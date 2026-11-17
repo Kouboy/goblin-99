@@ -383,7 +383,7 @@ export default function App() {
             <TouchControls onMove={handleMove} contextAction={contextAction} />
 
             <p className="hidden text-center text-xs text-[#9C9286] lg:block">
-              Flèches / WASD (déplacement & bump) + Espace / Entrée (escalier ou menu : fouiller, camper, sac, carte) · Raccourcis : I · Tab · R · C · Q
+              Flèches / WASD : avancer, aborder les PNJ · Espace / Entrée : inspecter un objet sous vos pieds, escalier ou actions · I · Tab · R · C · Q
             </p>
           </div>
 

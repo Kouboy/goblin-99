@@ -826,13 +826,32 @@ export function movePlayer(state: GameState, dx: number, dy: number): GameState 
   }
 
   const npc = floor.npcs.find((n) => !n.fled && !n.recruited && n.x === nx && n.y === ny);
-  if (npc) {
+  if (npc && !npc.paid) {
     return {
       ...state,
       modal: { type: 'npc', npcId: npc.id },
       lastMovementBlocked: false,
     };
   }
+
+  // A paid resident gives way even in a single-tile corridor.
+  // Swapping positions keeps both creatures visible and never requires a free side tile.
+  const crossingState: GameState = npc?.paid
+    ? {
+        ...state,
+        floors: {
+          ...state.floors,
+          [state.depth]: {
+            ...floor,
+            npcs: floor.npcs.map((resident) =>
+              resident.id === npc.id
+                ? { ...resident, x: state.player.x, y: state.player.y }
+                : resident,
+            ),
+          },
+        },
+      }
+    : state;
 
   if (targetTile.kind === 'inn_counter') {
     return { ...state, modal: { type: 'inn_counter' }, lastMovementBlocked: false };
@@ -862,25 +881,13 @@ export function movePlayer(state: GameState, dx: number, dy: number): GameState 
     return { ...state, logs, lastMovementBlocked: true };
   }
 
-  if (
-    targetTile.feature &&
-    !targetTile.feature.consumed &&
-    targetTile.feature.revealed &&
-    targetTile.feature.kind !== 'trap' &&
-    targetTile.feature.kind !== 'placed_trap'
-  ) {
-    return {
-      ...state,
-      modal: { type: 'feature', x: nx, y: ny },
-      lastMovementBlocked: false,
-    };
-  }
-
+  // Objects are on the floor, not walls: enter their tile freely.
+  // Space / Enter offers the deliberate choice to inspect or leave them.
   soundFx.step();
 
   if (floor.isInn) {
     return {
-      ...state,
+      ...crossingState,
       player: { x: nx, y: ny },
       lastMovementBlocked: false,
     };
@@ -913,7 +920,7 @@ export function movePlayer(state: GameState, dx: number, dy: number): GameState 
       });
 
       const nextState: GameState = {
-        ...state,
+        ...crossingState,
         player: { x: nx, y: ny },
         resources: { ...state.resources, hp: newHp },
         floors: { ...state.floors, [state.depth]: updatedFloor },
@@ -932,12 +939,12 @@ export function movePlayer(state: GameState, dx: number, dy: number): GameState 
         'Vous contournez avec précaution le piège repéré.',
         'info',
       );
-      return advanceDungeonTurn({ ...state, player: { x: nx, y: ny }, logs });
+      return advanceDungeonTurn({ ...crossingState, player: { x: nx, y: ny }, logs });
     }
   }
 
   return advanceDungeonTurn({
-    ...state,
+    ...crossingState,
     player: { x: nx, y: ny },
   });
 }
@@ -1960,6 +1967,37 @@ export function getContextAction(
   if (!floor || state.screen !== 'playing') return null;
 
   const tile = floor.tiles[state.player.y][state.player.x];
+
+  // Stepping onto a find is never blocked. Inspect only when the player chooses.
+  if (
+    tile.feature &&
+    tile.feature.revealed &&
+    !tile.feature.consumed &&
+    tile.feature.kind !== 'trap' &&
+    tile.feature.kind !== 'placed_trap'
+  ) {
+    const label =
+      tile.feature.kind === 'chest'
+        ? 'Examiner le coffre'
+        : tile.feature.kind === 'mushroom'
+        ? 'Examiner le champignon'
+        : tile.feature.kind === 'corpse'
+        ? 'Fouiller la dépouille'
+        : tile.feature.kind === 'well'
+        ? 'Examiner le puits'
+        : 'Examiner la flaque';
+
+    return {
+      id: 'inspect_feature',
+      label,
+      shortHint: 'Espace / Entrée',
+      execute: () =>
+        dispatch((s) => ({
+          ...s,
+          modal: { type: 'feature', x: s.player.x, y: s.player.y },
+        })),
+    };
+  }
 
   if (tile.kind === 'stairs_down') {
     return {

@@ -74,7 +74,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         <p className="text-[11px] text-[#574D43]">
           {contextAction
             ? `Raccourci : ${contextAction.shortHint} · Swipe actif`
-            : 'Bump sur un comptoir, coffre ou PNJ'}
+            : 'Avancez sur un objet, puis Action · Bump sur PNJ / comptoir'}
         </p>
       </div>
     </div>

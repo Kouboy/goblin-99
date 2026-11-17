@@ -138,7 +138,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
             <ul className="space-y-3 text-sm leading-relaxed text-[#3E3730]">
               <li>
-                <strong>Déplacement & bump :</strong> marchez vers un comptoir, un coffre, un puits ou un habitant pour interagir directement.
+                <strong>Déplacement :</strong> approchez un PNJ ou un comptoir pour interagir ; marchez sur un coffre ou un puits et appuyez sur Espace / Entrée pour l’examiner.
               </li>
               <li>
                 <strong>Refuges explorables :</strong> une auberge sûre apparaît tous les 4 étages (-4, -8, -12...).
@@ -158,7 +158,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               <span>100% Clavier & Tactile</span>
             </div>
             <p className="mt-1">
-              Jouable uniquement avec Flèches / WASD + Espace / Entrée (case vide → Fouiller, Camper, Sac, Carte). Raccourcis directs : I, Tab, R, C, Q · Swipe sur mobile.
+              Au clavier : Flèches / WASD pour marcher et pousser, Espace / Entrée pour inspecter un objet sous vos pieds, utiliser les escaliers ou ouvrir les actions. Raccourcis : I, Tab, R, C, Q · Swipe sur mobile.
             </p>
           </div>
         </section>

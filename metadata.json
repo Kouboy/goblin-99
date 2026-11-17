@@ -1,0 +1,6 @@
+{
+  "name": "Goblin Survivor -99",
+  "description": "Dungeon crawler inversé de survie tactique : incarnez un gobelin vulnérable dans le sillage des héros, entre auberges administratives et profondeurs à la lanterne.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -5,12 +5,14 @@ interface TitleScreenProps {
   memorialCount: number;
   onStart: (seed?: string) => void;
   onOpenMemorial: () => void;
+  onOpenFusainLab: () => void;
 }
 
 export const TitleScreen: React.FC<TitleScreenProps> = ({
   memorialCount,
   onStart,
   onOpenMemorial,
+  onOpenFusainLab,
 }) => {
   const [seedInput, setSeedInput] = useState('');
   const containerRef = useRef<HTMLElement | null>(null);
@@ -77,7 +79,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               Goblin Survivor -99
             </h1>
             <p className="max-w-xl text-base leading-relaxed text-[#D6D3D1]">
-              Vous n’êtes pas le héros de cette histoire. Glissez-vous dans le sillage des aventuriers, gérez votre huile, votre eau et vos vivres entre chaque auberge, et sachez faire demi-tour avant que la lanterne ne s’éteigne.
+              On raconte qu’un gobelin de niveau 1 atteignant le fond du Grand Puits, à l’étage -99, pourrait rencontrer le Maître du Donjon et devenir Héros. Glissez-vous le long de l’abîme entre les auberges suspendues, gérez votre lanterne et tracez votre propre route.
             </p>
           </div>
 
@@ -118,6 +120,15 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 <span>Mémorial ({memorialCount})</span>
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={onOpenFusainLab}
+              className="flex min-h-[44px] w-full items-center justify-between border border-[#343434] bg-[#101010] px-4 py-2.5 text-left text-xs font-medium text-[#FAF8F5] transition-colors hover:border-[#FAF8F5] focus:ring-2 focus:ring-[#FAF8F5] focus:outline-none"
+            >
+              <span>Atelier D.A. · Fusain Abyssal (Phases A, B &amp; test animé C)</span>
+              <span className="font-mono-num text-[#9C978E]">Ouvrir</span>
+            </button>
           </form>
         </section>
 
@@ -138,16 +149,16 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
             <ul className="space-y-3 text-sm leading-relaxed text-[#3E3730]">
               <li>
-                <strong>Déplacement & bump :</strong> marchez vers un comptoir, un coffre, un puits ou un habitant pour interagir directement.
+                <strong>Le Grand Puits :</strong> visible depuis chaque étage et chaque auberge. Observez le vide pour repérer les structures en contrebas.
               </li>
               <li>
-                <strong>Refuges explorables :</strong> une auberge sûre apparaît tous les 4 étages (-4, -8, -12...).
+                <strong>Route du bord ou galeries :</strong> coupez par les passerelles et treuils du vide, ou contournez par les salles périphériques.
               </li>
               <li>
                 <strong>Zéro duel héroïque :</strong> fuyez, posez un piège pliant ou sacrifiez un allié recruté si un héros vous traque.
               </li>
               <li>
-                <strong>Mémoire des lieux :</strong> les étages conservent votre carte et vos repères pour faciliter le retour.
+                <strong>Mémoire des lieux :</strong> les étages conservent votre carte et vos repères manuscrits pour faciliter le retour.
               </li>
             </ul>
           </div>

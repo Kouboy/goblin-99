@@ -3,6 +3,9 @@ export type VisibilityState = 'unknown' | 'remembered' | 'visible';
 export type TileKind =
   | 'wall'
   | 'floor'
+  | 'pit'
+  | 'pit_bridge'
+  | 'pit_winch'
   | 'stairs_up'
   | 'stairs_down'
   | 'inn_counter'
@@ -10,6 +13,24 @@ export type TileKind =
   | 'inn_tavern'
   | 'inn_bed'
   | 'vault_seal';
+
+export type PitRelation =
+  | 'terrace'
+  | 'bay'
+  | 'platform'
+  | 'scaffolding'
+  | 'corniche'
+  | 'passerelle'
+  | 'fenetre'
+  | 'treuil'
+  | 'fond';
+
+export interface PitLandmark {
+  depth: number;
+  kind: 'broken_bridge' | 'rusty_crane' | 'hero_camp' | 'ancient_arch' | 'silent_monolith';
+  label: string;
+  description: string;
+}
 
 export type FeatureKind =
   | 'chest'
@@ -113,6 +134,10 @@ export interface FloorMap {
   tiles: FloorTile[][];
   stairsUpPos: { x: number; y: number } | null;
   stairsDownPos: { x: number; y: number } | null;
+  pitRect: { x: number; y: number; w: number; h: number };
+  pitRelation: PitRelation;
+  pitLandmark?: PitLandmark;
+  winchUsed?: boolean;
   npcs: NpcEntity[];
   hero: HeroState | null;
   innMeta?: InnMeta;
@@ -186,6 +211,7 @@ export type ModalContext =
   | { type: 'inn_dormitory' }
   | { type: 'npc'; npcId: string }
   | { type: 'feature'; x: number; y: number }
+  | { type: 'pit_winch'; x: number; y: number }
   | { type: 'bag'; pendingPickup?: BagItem; sourcePos?: { x: number; y: number } }
   | { type: 'camp_confirm' }
   | { type: 'marker_place' }

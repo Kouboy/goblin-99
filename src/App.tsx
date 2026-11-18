@@ -17,6 +17,7 @@ import { ContextModal } from './components/ContextModal';
 import { DialogueBox } from './components/DialogueBox';
 import { DungeonCanvas } from './components/DungeonCanvas';
 import { EndScreen } from './components/EndScreen';
+import { FusainStudioView } from './components/FusainStudioView';
 import { HudPanel } from './components/HudPanel';
 import { MemorialView } from './components/MemorialView';
 import { TitleScreen } from './components/TitleScreen';
@@ -34,6 +35,7 @@ import {
   placeMarkerOnCurrentTile,
   resolveFeatureAction,
   resolveNpcInteraction,
+  resolvePitWinch,
   useBagItem,
   waitAndScan,
 } from './game/engine';
@@ -48,6 +50,7 @@ export default function App() {
   });
   const [soundOn, setSoundOn] = useState(true);
   const [seedCopied, setSeedCopied] = useState(false);
+  const [showFusainLab, setShowFusainLab] = useState(false);
 
   const startRun = useCallback((seed?: string) => {
     const fresh = createNewGame(seed);
@@ -99,7 +102,7 @@ export default function App() {
   // Unified Keyboard Handler (DialogueBox, Gameplay Movement, Map Tab, Marker R, etc.)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (gameState.screen !== 'playing') return;
+      if (showFusainLab || gameState.screen !== 'playing') return;
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
@@ -173,7 +176,11 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [gameState, handleMove, handleDismissDialogue]);
+  }, [gameState, handleMove, handleDismissDialogue, showFusainLab]);
+
+  if (showFusainLab) {
+    return <FusainStudioView onBack={() => setShowFusainLab(false)} />;
+  }
 
   if (gameState.screen === 'title') {
     return (
@@ -183,6 +190,7 @@ export default function App() {
         onOpenMemorial={() =>
           setGameState((prev) => ({ ...prev, screen: 'memorial' }))
         }
+        onOpenFusainLab={() => setShowFusainLab(true)}
       />
     );
   }
@@ -453,6 +461,9 @@ export default function App() {
             setGameState((prev) => ({ ...prev, modal: { type: 'map_overview' } }));
           }
         }}
+        onPitWinchChoice={(action) =>
+          setGameState((prev) => resolvePitWinch(prev, action))
+        }
       />
     </div>
   );

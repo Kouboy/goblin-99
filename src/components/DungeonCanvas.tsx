@@ -102,6 +102,110 @@ function drawCrosshatchedWall(
   ctx.restore();
 }
 
+function drawPitTile(
+  ctx: CanvasRenderingContext2D,
+  floor: FloorMap,
+  x: number,
+  y: number,
+  px: number,
+  py: number,
+  tileSize: number,
+  isRemembered: boolean,
+  time: number,
+  prefersReducedMotion: boolean,
+) {
+  const { pitRect } = floor;
+  const centerX = pitRect.x + (pitRect.w - 1) / 2;
+  const centerY = pitRect.y + (pitRect.h - 1) / 2;
+  const distNorm =
+    Math.hypot(x - centerX, y - centerY) / Math.max(1, Math.hypot(pitRect.w / 2, pitRect.h / 2));
+
+  // Deep abyssal void darker toward the center
+  ctx.fillStyle = isRemembered
+    ? '#0B0A09'
+    : distNorm < 0.45
+    ? '#040404'
+    : '#0A0807';
+  ctx.fillRect(px, py, tileSize, tileSize);
+
+  // Subtle receding structural contour ribs inside the shaft
+  ctx.save();
+  ctx.strokeStyle = isRemembered
+    ? 'rgba(130, 118, 102, 0.14)'
+    : 'rgba(165, 148, 126, 0.20)';
+  ctx.lineWidth = 1;
+  const inset = tileSize * 0.18;
+  ctx.strokeRect(px + inset, py + inset, tileSize - inset * 2, tileSize - inset * 2);
+
+  // Perspective corner lines pointing toward shaft center
+  const dirX = x < centerX ? 1 : x > centerX ? -1 : 0;
+  const dirY = y < centerY ? 1 : y > centerY ? -1 : 0;
+  if (dirX !== 0 || dirY !== 0) {
+    ctx.strokeStyle = isRemembered
+      ? 'rgba(130, 118, 102, 0.11)'
+      : 'rgba(165, 148, 126, 0.16)';
+    ctx.beginPath();
+    ctx.moveTo(px + tileSize / 2, py + tileSize / 2);
+    ctx.lineTo(px + tileSize / 2 + dirX * tileSize * 0.42, py + tileSize / 2 + dirY * tileSize * 0.42);
+    ctx.stroke();
+  }
+
+  // Hanging vertical chains on shaft corners / columns
+  if ((x === pitRect.x || x === pitRect.x + pitRect.w - 1) && (y === pitRect.y || y === pitRect.y + pitRect.h - 1)) {
+    ctx.strokeStyle = isRemembered ? 'rgba(140, 120, 96, 0.28)' : 'rgba(180, 152, 116, 0.42)';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([2.5, 2.5]);
+    ctx.beginPath();
+    ctx.moveTo(px + tileSize * 0.5, py + tileSize * 0.1);
+    ctx.lineTo(px + tileSize * 0.5, py + tileSize * 0.9);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Distant tiny lights deep below in the Great Pit
+  const h = tileHash(x, y, 71);
+  if (!isRemembered && h > 0.72) {
+    const twinkle = prefersReducedMotion ? 0.55 : 0.35 + 0.35 * Math.sin(time * 0.0024 + h * 12);
+    const drift = prefersReducedMotion ? 0 : Math.sin(time * 0.0008 + h * 8) * 2.5;
+    const lx = px + tileSize * (0.3 + h * 0.35) + drift;
+    const ly = py + tileSize * (0.35 + tileHash(x, y, 19) * 0.3);
+    ctx.fillStyle = `rgba(229, 154, 56, ${twinkle})`;
+    ctx.beginPath();
+    ctx.arc(lx, ly, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Stone safety parapet rim along edges bordering walkable tiles
+  const isRimEdge = (nx: number, ny: number) => {
+    if (nx < 0 || ny < 0 || nx >= floor.width || ny >= floor.height) return false;
+    const n = floor.tiles[ny][nx];
+    return n.kind !== 'pit' && n.kind !== 'wall';
+  };
+
+  ctx.strokeStyle = isRemembered ? '#574D43' : '#B8A892';
+  ctx.lineWidth = Math.max(1.8, tileSize * 0.05);
+  ctx.beginPath();
+  if (isRimEdge(x, y - 1)) {
+    ctx.moveTo(px, py + 1.5);
+    ctx.lineTo(px + tileSize, py + 1.5);
+  }
+  if (isRimEdge(x, y + 1)) {
+    ctx.moveTo(px, py + tileSize - 1.5);
+    ctx.lineTo(px + tileSize, py + tileSize - 1.5);
+  }
+  if (isRimEdge(x - 1, y)) {
+    ctx.moveTo(px + 1.5, py);
+    ctx.lineTo(px + 1.5, py + tileSize);
+  }
+  if (isRimEdge(x + 1, y)) {
+    ctx.moveTo(px + tileSize - 1.5, py);
+    ctx.lineTo(px + tileSize - 1.5, py + tileSize);
+  }
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 function drawGoblin(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -354,6 +458,64 @@ export const DungeonCanvas: React.FC<DungeonCanvasProps> = ({ state, onMove }) =
 
           if (tile.kind === 'wall') {
             drawCrosshatchedWall(ctx, floor, x, y, px, py, tileSize, isInn, isRemembered);
+            continue;
+          }
+
+          if (tile.kind === 'pit') {
+            drawPitTile(ctx, floor, x, y, px, py, tileSize, isRemembered, time, prefersReducedMotion);
+            continue;
+          }
+
+          if (tile.kind === 'pit_bridge') {
+            drawPitTile(ctx, floor, x, y, px, py, tileSize, isRemembered, time, prefersReducedMotion);
+            ctx.save();
+            if (isRemembered) ctx.globalAlpha = 0.55;
+            const horiz =
+              (x > 0 && floor.tiles[y][x - 1].kind !== 'pit') ||
+              (x < floor.width - 1 && floor.tiles[y][x + 1].kind !== 'pit');
+            ctx.fillStyle = '#8C6239';
+            ctx.strokeStyle = '#15120F';
+            ctx.lineWidth = 1.4;
+            if (horiz) {
+              ctx.fillRect(px, py + tileSize * 0.18, tileSize, tileSize * 0.64);
+              ctx.strokeRect(px, py + tileSize * 0.18, tileSize, tileSize * 0.64);
+              ctx.beginPath();
+              for (let s = 0.25; s < 0.9; s += 0.25) {
+                ctx.moveTo(px + tileSize * s, py + tileSize * 0.18);
+                ctx.lineTo(px + tileSize * s, py + tileSize * 0.82);
+              }
+              ctx.stroke();
+            } else {
+              ctx.fillRect(px + tileSize * 0.18, py, tileSize * 0.64, tileSize);
+              ctx.strokeRect(px + tileSize * 0.18, py, tileSize * 0.64, tileSize);
+              ctx.beginPath();
+              for (let s = 0.25; s < 0.9; s += 0.25) {
+                ctx.moveTo(px + tileSize * 0.18, py + tileSize * s);
+                ctx.lineTo(px + tileSize * 0.82, py + tileSize * s);
+              }
+              ctx.stroke();
+            }
+            ctx.restore();
+            continue;
+          }
+
+          if (tile.kind === 'pit_winch') {
+            drawPitTile(ctx, floor, x, y, px, py, tileSize, isRemembered, time, prefersReducedMotion);
+            ctx.save();
+            if (isRemembered) ctx.globalAlpha = 0.55;
+            ctx.fillStyle = floor.winchUsed ? '#6E6458' : '#C87D20';
+            ctx.strokeStyle = '#15120F';
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.arc(cx, cy, tileSize * 0.3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#15120F';
+            ctx.font = `bold ${Math.round(tileSize * 0.34)}px "JetBrains Mono", monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('⚙', cx, cy + 1);
+            ctx.restore();
             continue;
           }
 

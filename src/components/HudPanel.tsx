@@ -120,18 +120,33 @@ export const HudPanel: React.FC<HudPanelProps> = ({
 
   const discoveredEntries = Object.entries(state.discoveredMushrooms);
 
+  const pitRelationLabel: Record<string, string> = {
+    terrace: 'Terrasse sur le Grand Puits',
+    bay: 'Baie ouverte sur l’abîme',
+    platform: 'Plateforme suspendue',
+    scaffolding: 'Charpente autour du conduit',
+    corniche: 'Corniche du Puits',
+    passerelle: 'Passerelle sur le vide',
+    fenetre: 'Fenêtres sur le Puits',
+    treuil: 'Treuil & monte-charge',
+    fond: 'Fond de l’abîme',
+  };
+
   return (
     <aside className="archival-ledger flex flex-col gap-3.5 rounded-sm p-4 sm:p-5">
       {/* Ledger Header + Red Administrative Stamp */}
       <div className="flex items-start justify-between gap-3 border-b-2 border-[#231F1B] pb-3">
         <div className="min-w-0">
           <p className="font-mono-num text-[11px] font-semibold text-[#574D43]">
-            Registre de terrain · Tour {state.turn} · {floor ? `${floor.width}×${floor.height}` : ''}
+            Registre · Tour {state.turn} · {floor ? `${floor.width}×${floor.height}` : ''}
           </p>
           <h2 className="truncate font-display text-xl font-bold text-[#1E1B18]">
             {floor?.biomeLabel ?? 'Profondeurs'}
           </h2>
-          <p className="mt-0.5 text-xs text-[#574D43]">{innInfo.label}</p>
+          <p className="mt-0.5 text-xs text-[#574D43]">
+            {floor ? `${pitRelationLabel[floor.pitRelation] ?? 'Grand Puits'} · ` : ''}
+            {innInfo.label}
+          </p>
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
           <span className="stamp-seal px-2 py-0.5 font-mono-num text-[11px] font-bold">

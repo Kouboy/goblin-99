@@ -27,6 +27,7 @@ interface ContextModalProps {
   onConfirmCamp: () => void;
   onPlaceMarker: (text: string) => void;
   onActionMenuChoice: (choice: 'scan' | 'camp' | 'bag' | 'map') => void;
+  onPitWinchChoice: (action: 'salvage' | 'descend' | 'leave') => void;
 }
 
 export const ContextModal: React.FC<ContextModalProps> = ({
@@ -39,6 +40,7 @@ export const ContextModal: React.FC<ContextModalProps> = ({
   onConfirmCamp,
   onPlaceMarker,
   onActionMenuChoice,
+  onPitWinchChoice,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const markerInputRef = useRef<HTMLInputElement | null>(null);
@@ -655,6 +657,61 @@ export const ContextModal: React.FC<ContextModalProps> = ({
         );
       }
 
+      case 'pit_winch': {
+        const winchUsed = floor?.winchUsed ?? false;
+        const canHoistDescend = state.resources.oil >= 1;
+        return (
+          <div className="space-y-4">
+            <div className="border-b border-[#1E1B18]/15 pb-3 pr-8">
+              <p className="font-mono-num text-xs text-[#6B5E52]">Installation du Grand Puits</p>
+              <h3 className="font-display text-xl font-bold text-[#1E1B18]">
+                Treuil & monte-charge douteux
+              </h3>
+            </div>
+            <p className="text-sm leading-relaxed text-[#3E3730]">
+              Des chaînes graissées à la hâte plongent dans le vide. L’engrenage fera un vacarme d’enfer dans tout l’abîme si vous l’actionnez.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={winchUsed}
+                onClick={() => onPitWinchChoice('salvage')}
+                className={`min-h-[44px] rounded-lg border border-[#1E1B18]/25 bg-[#EFE8DA] px-4 py-2 text-left text-sm hover:bg-[#E5DCC9] disabled:opacity-45 ${focusBtnClass}`}
+              >
+                <div className="font-semibold text-[#1E1B18]">
+                  {winchUsed ? 'Câble déjà remonté à vide' : 'Tirer la chaîne du puits (+3 or, +2 huile)'}
+                </div>
+                <div className="text-xs text-[#6B5E52]">
+                  Bruit très élevé · peut attirer un Héros
+                </div>
+              </button>
+
+              <button
+                type="button"
+                disabled={!canHoistDescend}
+                onClick={() => onPitWinchChoice('descend')}
+                className={`min-h-[44px] rounded-lg bg-[#1E1B18] px-4 py-2 text-left text-sm text-[#F4EFE6] hover:bg-[#38312B] disabled:opacity-45 ${focusBtnClass}`}
+              >
+                <div className="font-semibold">
+                  Emprunter la nacelle vers le bas (-1 huile)
+                </div>
+                <div className="text-xs text-[#D6D3D1]">
+                  Saute 1 à 2 étages directement le long du Puits
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onPitWinchChoice('leave')}
+                className={`min-h-[40px] rounded-lg border border-[#1E1B18]/30 px-4 py-1.5 text-xs font-medium text-[#1E1B18] ${focusBtnClass}`}
+              >
+                Laisser (Échap)
+              </button>
+            </div>
+          </div>
+        );
+      }
+
       case 'bag': {
         const pending = state.modal.pendingPickup;
         return (
@@ -844,7 +901,19 @@ export const ContextModal: React.FC<ContextModalProps> = ({
                     let textColor = '#F1EDE4';
 
                     if (vis !== 'unknown') {
-                      if (tile.kind === 'wall') {
+                      if (tile.kind === 'pit') {
+                        bg = '#050506';
+                        textColor = '#6B5E52';
+                        glyph = '·';
+                      } else if (tile.kind === 'pit_bridge') {
+                        bg = '#8C6239';
+                        textColor = '#F4EFE6';
+                        glyph = '≡';
+                      } else if (tile.kind === 'pit_winch') {
+                        bg = '#C87D20';
+                        textColor = '#121417';
+                        glyph = '⚙';
+                      } else if (tile.kind === 'wall') {
                         bg = vis === 'visible' ? '#333B48' : '#21262F';
                       } else {
                         bg = vis === 'visible' ? '#1E2530' : '#151920';
@@ -902,7 +971,7 @@ export const ContextModal: React.FC<ContextModalProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#6B5E52]">
-              <span>@ Vous · ▲ Montée · ▼ Descente · ⚑ Repère · Bleu Eau · Brun Coffre</span>
+              <span>@ Vous · · Grand Puits · ≡ Passerelle · ▲ Montée · ▼ Descente · ⚑ Repère</span>
             </div>
 
             {markers.length > 0 && (
@@ -978,9 +1047,9 @@ export const ContextModal: React.FC<ContextModalProps> = ({
           <div className="space-y-4">
             <div className="flex items-start justify-between border-b border-[#1E1B18]/15 pb-3 pr-8">
               <div>
-                <p className="font-mono-num text-xs text-[#6B5E52]">Étage terminal -99</p>
+                <p className="font-mono-num text-xs text-[#6B5E52]">Fond du Grand Puits · -99</p>
                 <h3 className="font-display text-xl font-bold text-[#1E1B18]">
-                  Grand Registre des Profondeurs
+                  Pupitre du Maître du Donjon
                 </h3>
               </div>
               <span className="stamp-seal px-2 py-0.5 font-mono-num text-[11px] font-bold">
@@ -988,7 +1057,7 @@ export const ContextModal: React.FC<ContextModalProps> = ({
               </span>
             </div>
             <p className="text-sm leading-relaxed text-[#3E3730]">
-              Vous avez atteint le dernier bureau souterrain vivant. Apposez le tampon final pour homologuer votre survie au mémorial, ou continuez d’explorer.
+              Au pied des chaînes de quatre-vingt-dix-neuf étages, le Maître du Donjon lève à peine les yeux de ses feuillets. Un tampon vierge attend à côté du Grand Registre, sans révéler ce que vaut vraiment la Prophétie du Niveau 1.
             </p>
             <div className="flex gap-2">
               <button
@@ -996,14 +1065,14 @@ export const ContextModal: React.FC<ContextModalProps> = ({
                 onClick={() => onInnService({ type: 'stamp_99_victory' })}
                 className={`min-h-[44px] flex-1 rounded-lg bg-[#B8332F] px-4 py-2 text-sm font-semibold text-[#F4EFE6] hover:bg-[#9E2A26] ${focusBtnClass}`}
               >
-                Tamponner la survie (-99)
+                Présenter son dossier (-99)
               </button>
               <button
                 type="button"
                 onClick={onClose}
                 className={`min-h-[44px] rounded-lg border border-[#1E1B18]/30 px-4 py-2 text-sm font-medium text-[#1E1B18] ${focusBtnClass}`}
               >
-                Rester ici
+                Observer encore
               </button>
             </div>
           </div>

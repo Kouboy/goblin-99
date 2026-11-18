@@ -66,6 +66,18 @@ class SoundEngine {
   hurt() {
     this.tone(120, 0.16, 'sawtooth', 0.05);
   }
+
+  pitGaze() {
+    // Soft hollow wind & deep distant resonance
+    this.tone(98, 0.45, 'sine', 0.022);
+    this.tone(146, 0.55, 'triangle', 0.014, 0.08);
+  }
+
+  pitClang() {
+    // Distant reverberating iron chain clang
+    this.tone(310, 0.12, 'triangle', 0.03);
+    this.tone(205, 0.36, 'sine', 0.022, 0.06);
+  }
 }
 
 export const soundFx = new SoundEngine();

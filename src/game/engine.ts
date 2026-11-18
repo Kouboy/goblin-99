@@ -14,7 +14,12 @@ import {
   MushroomEffect,
   NpcEntity,
 } from './types';
-import { generateDungeonFloor, isInnDepth } from './worldGen';
+import {
+  generateDungeonFloor,
+  getPitLandmarkForDepth,
+  getPitPerceptionNote,
+  isInnDepth,
+} from './worldGen';
 
 export function makeBagItem(
   kind: BagItemKind,
@@ -289,8 +294,8 @@ export function createNewGame(rawSeed?: string): GameState {
       {
         id: 'dlg-init',
         speaker: identity.name,
-        badge: 'DÉPART',
-        text: `Lanterne prête, trois repères à la craie dans la poche. Faites le tour des comptoirs de l’auberge ou descendez par la trappe au sud.`,
+        badge: 'PROPHÉTIE N.1',
+        text: `Lanterne prête, trois repères à la craie en poche. La terrasse ouvre sur le Grand Puits qui plonge jusqu’à l’étage -99 : selon la Prophétie, un gobelin niveau 1 y rencontrant le Maître du Donjon obtiendrait le rang de Héros.`,
         tone: 'info',
         turn: 0,
         depth: 0,
@@ -376,7 +381,8 @@ function findNextHeroStep(
       if (nx < 0 || nx >= floor.width || ny < 0 || ny >= floor.height) continue;
       const key = `${nx},${ny}`;
       if (visited.has(key)) continue;
-      if (floor.tiles[ny][nx].kind === 'wall') continue;
+      const tKind = floor.tiles[ny][nx].kind;
+      if (tKind === 'wall' || tKind === 'pit' || tKind === 'pit_winch') continue;
 
       const step = curr.firstStep ?? { x: nx, y: ny };
       if (nx === tx && ny === ty) {
@@ -406,7 +412,8 @@ function findSafeEscapeTile(
     const nx = from.x + dx;
     const ny = from.y + dy;
     if (nx < 0 || nx >= floor.width || ny < 0 || ny >= floor.height) continue;
-    if (floor.tiles[ny][nx].kind === 'wall') continue;
+    const tKind = floor.tiles[ny][nx].kind;
+    if (tKind === 'wall' || tKind === 'pit' || tKind === 'pit_winch') continue;
     const hasNpc = floor.npcs.some((n) => !n.fled && !n.recruited && n.x === nx && n.y === ny);
     if (hasNpc) continue;
     const d = Math.abs(nx - avoid.x) + Math.abs(ny - avoid.y);
@@ -825,6 +832,18 @@ export function movePlayer(state: GameState, dx: number, dy: number): GameState 
     return { ...state, lastMovementBlocked: true };
   }
 
+  if (targetTile.kind === 'pit') {
+    return gazeIntoPit(state);
+  }
+
+  if (targetTile.kind === 'pit_winch') {
+    return {
+      ...state,
+      modal: { type: 'pit_winch', x: nx, y: ny },
+      lastMovementBlocked: false,
+    };
+  }
+
   const npc = floor.npcs.find((n) => !n.fled && !n.recruited && n.x === nx && n.y === ny);
   if (npc) {
     return {
@@ -936,8 +955,20 @@ export function movePlayer(state: GameState, dx: number, dy: number): GameState 
     }
   }
 
+  const bridgeLogs =
+    targetTile.kind === 'pit_bridge' && state.turn % 2 === 0
+      ? appendLog(
+          state.logs,
+          state.turn + 1,
+          state.depth,
+          'Les planches de la passerelle gémissent au-dessus du Grand Puits ; un courant d’air glacé monte du vide.',
+          'neutral',
+        )
+      : state.logs;
+
   return advanceDungeonTurn({
     ...state,
+    logs: bridgeLogs,
     player: { x: nx, y: ny },
   });
 }
@@ -1050,13 +1081,26 @@ export function useStairs(state: GameState, direction: 'up' | 'down'): GameState
       );
     }
   } else {
+    const landmarkText = nextFloor.pitLandmark
+      ? ` · Au centre, vous retrouvez : ${nextFloor.pitLandmark.label}.`
+      : '';
     logs = appendLog(
       logs,
       state.turn,
       targetDepth,
-      `${direction === 'down' ? 'Descente' : 'Remontée'} à l’étage ${targetDepth} (${nextFloor.biomeLabel}, ${nextFloor.width}×${nextFloor.height}).`,
+      `${direction === 'down' ? 'Descente' : 'Remontée'} à l’étage ${targetDepth} (${nextFloor.biomeLabel}, ${nextFloor.width}×${nextFloor.height})${landmarkText}`,
       'info',
     );
+    if (targetDepth === CONFIG.TARGET_DEPTH) {
+      dialogueQueue = enqueueDialogue(dialogueQueue, {
+        speaker: state.narrative.goblinName,
+        badge: 'ÉTAGE -99',
+        text: 'Les chaînes du Grand Puits s’arrêtent ici. Au bout de la salle se tient une silhouette immobile devant le Grand Registre : le Maître du Donjon.',
+        tone: 'warn',
+        turn: state.turn,
+        depth: targetDepth,
+      });
+    }
     soundFx.step();
   }
 
@@ -1508,6 +1552,184 @@ export function resolveNpcInteraction(
     },
     0.04,
   );
+}
+
+/**
+ * Observes Le Grand Puits from any adjacent ledge, balcony, or inn terrace.
+ * Surfaces persistent deeper landmarks and sensory cues without risking a fall.
+ */
+export function gazeIntoPit(state: GameState): GameState {
+  soundFx.pitGaze();
+  const baseNote = getPitPerceptionNote(state.depth);
+
+  let belowObservation = '';
+  for (let offset = 1; offset <= 4; offset++) {
+    const checkDepth = state.depth - offset;
+    if (checkDepth < CONFIG.TARGET_DEPTH) break;
+    if (checkDepth === CONFIG.TARGET_DEPTH) {
+      belowObservation =
+        'Tout au fond, à -99, une lueur immobile découpe l’ombre d’un pupitre solitaire.';
+      break;
+    }
+    if (isInnDepth(checkDepth)) {
+      belowObservation = `À ${offset} étage${offset > 1 ? 's' : ''} en dessous (${checkDepth}), une lanterne d’auberge perce l’obscurité sur le flanc du Puits.`;
+      break;
+    }
+    const lm = getPitLandmarkForDepth(state.seed, checkDepth);
+    if (lm) {
+      belowObservation = `Plus bas vers l’étage ${checkDepth}, vous distinguez ${lm.description}.`;
+      break;
+    }
+  }
+
+  const sensoryCues = [
+    'Un courant d’air vertical fait vaciller la flamme de votre lanterne.',
+    'Un caillou roulé au bord chute sans jamais produire de bruit d’impact.',
+    'Un choc métallique lointain monte des chaînes et résonne longuement.',
+    'Très bas, une minuscule étincelle de torche traverse lentement une passerelle.',
+  ];
+  const cue = sensoryCues[(Math.abs(state.depth) + state.turn) % sensoryCues.length];
+
+  const text = [baseNote, belowObservation, cue].filter(Boolean).join(' ');
+
+  const dialogueQueue = enqueueDialogue(state.dialogueQueue, {
+    speaker: state.narrative.goblinName,
+    badge: 'GRAND PUITS',
+    text,
+    tone: 'info',
+    turn: state.turn,
+    depth: state.depth,
+  });
+
+  return {
+    ...state,
+    dialogueQueue,
+    lastMovementBlocked: false,
+  };
+}
+
+/**
+ * Resolves interaction with a shaft winch / hoists (pit_winch).
+ */
+export function resolvePitWinch(
+  state: GameState,
+  action: 'salvage' | 'descend' | 'leave',
+): GameState {
+  const floor = state.floors[state.depth];
+  if (!floor) return { ...state, modal: { type: 'none' } };
+
+  if (action === 'leave') {
+    return { ...state, modal: { type: 'none' } };
+  }
+
+  if (action === 'salvage') {
+    if (floor.winchUsed) {
+      return {
+        ...state,
+        modal: { type: 'none' },
+        logs: appendLog(state.logs, state.turn, state.depth, 'Le câble du treuil est déjà remonté à vide.', 'neutral'),
+      };
+    }
+    soundFx.pitClang();
+    const newOil = Math.min(CONFIG.MAX_OIL, Number((state.resources.oil + 2).toFixed(2)));
+    const newGold = state.resources.gold + 3;
+    const updatedFloor: FloorMap = { ...floor, winchUsed: true };
+    const dialogueQueue = enqueueDialogue(state.dialogueQueue, {
+      speaker: state.narrative.goblinName,
+      badge: 'TREUIL',
+      text: 'Le tambour métallique grince dans tout le Grand Puits ! Vous hissez une caisse oubliée : quelques pièces et une flasque d’huile tiède.',
+      deltaText: '+3 or, +2 huile (bruit élevé)',
+      tone: 'good',
+      turn: state.turn + 1,
+      depth: state.depth,
+    });
+    return advanceDungeonTurn(
+      {
+        ...state,
+        resources: { ...state.resources, oil: newOil, gold: newGold },
+        floors: { ...state.floors, [state.depth]: updatedFloor },
+        dialogueQueue,
+        modal: { type: 'none' },
+      },
+      0.38,
+    );
+  }
+
+  // Descend via risky hoist (-2 floors, stopping at next Inn or -99 if closer)
+  if (state.resources.oil < 1) {
+    return {
+      ...state,
+      modal: { type: 'none' },
+      logs: appendLog(
+        state.logs,
+        state.turn,
+        state.depth,
+        'Il faut au moins 1 huile pour éclairer la descente du monte-charge.',
+        'warn',
+      ),
+    };
+  }
+
+  soundFx.pitClang();
+  let targetDepth = state.depth - 2;
+  if (isInnDepth(state.depth - 1)) {
+    targetDepth = state.depth - 1;
+  }
+  targetDepth = Math.max(CONFIG.TARGET_DEPTH, targetDepth);
+
+  let nextFloor = state.floors[targetDepth];
+  if (!nextFloor) {
+    nextFloor = generateDungeonFloor(state.seed, targetDepth);
+  }
+  const spawnPos = nextFloor.stairsUpPos ?? { x: 4, y: 2 };
+  const newOil = Number((state.resources.oil - 1).toFixed(2));
+
+  let resources = { ...state.resources, oil: newOil };
+  let narrative = { ...state.narrative, stairsCrossed: state.narrative.stairsCrossed + 1 };
+  let dialogueQueue = state.dialogueQueue;
+
+  if (nextFloor.isInn && nextFloor.innMeta && !nextFloor.innMeta.visitedBefore) {
+    const innMeta = nextFloor.innMeta;
+    resources = {
+      ...resources,
+      hp: Math.min(CONFIG.MAX_HP, resources.hp + CONFIG.INN_ARRIVAL_BONUS.hp),
+      gold: resources.gold + CONFIG.INN_ARRIVAL_BONUS.gold,
+      oil: Math.min(CONFIG.MAX_OIL, Math.max(resources.oil + CONFIG.INN_ARRIVAL_BONUS.oil, CONFIG.INN_OIL)),
+      food: Math.max(resources.food, CONFIG.INN_FOOD),
+      water: Math.max(resources.water, CONFIG.INN_WATER),
+    };
+    nextFloor = { ...nextFloor, innMeta: { ...innMeta, visitedBefore: true } };
+    narrative = {
+      ...narrative,
+      lastInnName: innMeta.name,
+      lastInnDepth: targetDepth,
+      innsReached: narrative.innsReached + 1,
+    };
+  }
+
+  nextFloor = updateFloorVisibility(nextFloor, spawnPos, resources.oil);
+  dialogueQueue = enqueueDialogue(dialogueQueue, {
+    speaker: state.narrative.goblinName,
+    badge: 'MONTE-CHARGE',
+    text: `La nacelle file le long du vide dans un fracas de ferraille et vous dépose directement à l’étage ${targetDepth}.`,
+    deltaText: '-1 huile, raccourci vertical',
+    tone: 'warn',
+    turn: state.turn,
+    depth: targetDepth,
+  });
+
+  return {
+    ...state,
+    depth: targetDepth,
+    maxDepthReached: Math.min(state.maxDepthReached, targetDepth),
+    player: spawnPos,
+    resources,
+    localNoise: nextFloor.isInn ? 0 : 0.35,
+    modal: { type: 'none' },
+    narrative,
+    dialogueQueue,
+    floors: { ...state.floors, [targetDepth]: nextFloor },
+  };
 }
 
 /**

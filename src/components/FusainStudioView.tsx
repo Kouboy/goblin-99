@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  Columns2,
   Compass,
   Eye,
+  FileSearch,
   Flame,
+  Layers,
   Maximize2,
+  Pause,
   Play,
   RotateCcw,
   ShieldAlert,
@@ -16,8 +20,19 @@ import imgContraste from '../assets/images/fusain_phase_a_contraste_179493426976
 import imgGestuel from '../assets/images/fusain_phase_a_gestuel_1794934272817.jpg';
 import { soundFx } from '../game/audio';
 import { buildFusainPixelAtlas, FusainPixelAtlas } from '../game/fusainPixelSprites';
-
-export type FusainVariationId = 'contraste' | 'gestuel' | 'atmospherique';
+import {
+  DustMote,
+  FootprintMark,
+  FusainVariationId,
+  getSceneTile,
+  GRID_H,
+  GRID_W,
+  HERO_PATROL,
+  isWalkable,
+  PitExperimentId,
+  renderPhaseCFrame,
+  SceneRenderSnapshot,
+} from '../game/fusainPitRenderer';
 
 interface FusainStudioViewProps {
   onBack: () => void;
@@ -34,6 +49,17 @@ interface VariationSpec {
   personality: string;
   production: string;
   verdict: string;
+}
+
+interface ExperimentSpec {
+  id: PitExperimentId;
+  keyHint: string;
+  shortLabel: string;
+  title: string;
+  hypothesis: string;
+  mechanism: string;
+  parallaxRule: string;
+  limitNote: string;
 }
 
 const VARIATIONS: VariationSpec[] = [
@@ -87,69 +113,111 @@ const VARIATIONS: VariationSpec[] = [
   },
 ];
 
-// --- Phase C Playable Validation Grid (14x9) ---
-// Legend: '#' = wall, '.' = floor, 'P' = Grand Puits void, 'B' = narrow pit bridge, 'I' = inn warm floor, 'W' = inn window wall
-const SCENE_ROWS = [
-  '##############',
-  '#...##PPPPPP.#',
-  '#...#.PPPPPP.#',
-  '#IIW..P.PPPP.#',
-  '#II...BBBBBB.#',
-  '#IIW..PPPPPP.#',
-  '#...#.PPPPPP.#',
-  '#...##PPPPPP.#',
-  '##############',
+const EXPERIMENTS: ExperimentSpec[] = [
+  {
+    id: 'initial',
+    keyHint: '1',
+    shortLabel: 'Initial',
+    title: 'Référence initiale (Bayer 336×216)',
+    hypothesis: 'Fond rectangulaire à 4 strates parallaxes + trame Bayer sur les dalles.',
+    mechanism: 'Strates flottantes décalées par la position du joueur, bord du gouffre d’épaisseur 1 px.',
+    parallaxRule: 'Parallaxe libre (indispensable pour sentir les plans).',
+    limitNote: 'Sur image fixe, le gouffre s’aplatit en motif décoratif sans paroi verticale franche.',
+  },
+  {
+    id: 'exp_a',
+    keyHint: '2',
+    shortLabel: 'Exp. A · Paroi',
+    title: 'Expérience A — Paroi verticale & occlusion',
+    hypothesis: 'Prouver qu’on regarde par-dessus un bord vertical sans aucun mouvement.',
+    mechanism:
+      'Rebord épais biseauté, falaise striée vers le bas, ombres portées, poutre et chaîne occultées sous le pont et l’éperon.',
+    parallaxRule: 'Parallaxe strictement verrouillée à OFF.',
+    limitNote: 'La lecture reste frontale sur un seul pan de falaise : l’espace latéral du puits manque encore de volume 3D.',
+  },
+  {
+    id: 'exp_b',
+    keyHint: '3',
+    shortLabel: 'Exp. B · 3D unifiée',
+    title: 'Expérience B — Architecture verticale cohérente',
+    hypothesis: 'Relier les étages par un point de fuite vertical unique et un câble maître continu.',
+    mechanism:
+      'Projection vers un point de fuite inférieur unique, treuil ancré au niveau 0, 3 plateformes proportionnées et passerelle est occultée.',
+    parallaxRule: 'Parallaxe optionnelle strictement bornée.',
+    limitNote: 'Les anneaux concentriques risquent une lecture « cage d’ascenseur » géométrique si le fusain reste trop régulier.',
+  },
+  {
+    id: 'exp_c',
+    keyHint: '4',
+    shortLabel: 'Exp. C · Hybride',
+    title: 'Expérience C — Représentation hybride (coupe oblique ~65°)',
+    hypothesis: 'Garder une grille jouable en vue de dessus pendant que l’ouverture bascule en coupe verticale.',
+    mechanism:
+      'Parois convergentes au fusain frotté, arche cyclopéenne et cage géante (×3) au -1, auberge miniature éclairée au -2.',
+    parallaxRule: 'Parallaxe légère optionnelle.',
+    limitNote: 'Demande de masquer soigneusement la couture entre le bord plan du sol et la coupe oblique du vide.',
+  },
 ];
 
-const GRID_W = 14;
-const GRID_H = 9;
-
-type SceneTileKind = 'wall' | 'floor' | 'pit' | 'bridge' | 'inn' | 'inn_window';
-
-function getSceneTile(x: number, y: number): SceneTileKind {
-  if (x < 0 || y < 0 || x >= GRID_W || y >= GRID_H) return 'wall';
-  const ch = SCENE_ROWS[y][x];
-  if (ch === '#') return 'wall';
-  if (ch === 'P') return 'pit';
-  if (ch === 'B') return 'bridge';
-  if (ch === 'I') return 'inn';
-  if (ch === 'W') return 'inn_window';
-  return 'floor';
+interface EvaluationRow {
+  criterion: string;
+  initial: string;
+  expA: string;
+  expB: string;
+  expC: string;
 }
 
-function isWalkable(x: number, y: number): boolean {
-  const k = getSceneTile(x, y);
-  return k === 'floor' || k === 'bridge' || k === 'inn';
-}
-
-function hash2D(x: number, y: number, salt = 0): number {
-  let n = Math.imul(x + 19, 374761393) + Math.imul(y + 53, 668265263) + Math.imul(salt + 7, 1442695041);
-  n = (n ^ (n >>> 13)) >>> 0;
-  n = Math.imul(n, 1274126177) >>> 0;
-  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
-}
-
-const HERO_PATROL: Array<{ x: number; y: number }> = [
-  { x: 12, y: 1 },
-  { x: 12, y: 2 },
-  { x: 12, y: 3 },
-  { x: 12, y: 4 },
-  { x: 11, y: 4 },
-  { x: 10, y: 4 },
-  { x: 9, y: 4 },
-  { x: 8, y: 4 },
+const EVALUATION_MATRIX: EvaluationRow[] = [
+  {
+    criterion: '1. Sensation de hauteur et d’abîme (image fixe)',
+    initial: 'Faible : les strates se superposent sans bord vertical épais ni fuite vers le bas.',
+    expA: 'Bonne : on perçoit immédiatement une falaise sous la corniche et des pilotis ancrés dans la roche.',
+    expB: 'Forte : la convergence vers le point de fuite inférieur aspire le regard vers les strates profondes.',
+    expC: 'Très forte : le contraste d’échelle (cage ×3, auberge minuscule au -2) crée un choc vertical immédiat.',
+  },
+  {
+    criterion: '2. Lisibilité des cases jouables',
+    initial: 'Correcte mais bruitée par le tramage Bayer sur le grain du sol.',
+    expA: 'Exemplaire : rebords nets à la craie, séparation franche entre sol praticable et paroi plongeante.',
+    expB: 'Très bonne : le treuil reste ancré hors grille jouable sans gêner le passage de la passerelle.',
+    expC: 'Très bonne : les cases et sprites 48×48 restent strictement orthogonaux malgré l’ouverture oblique.',
+  },
+  {
+    criterion: '3. Contraste d’échelle (Gobelin vs Architecture)',
+    initial: 'Modéré : la roue lointaine paraît juste plate, sans objet intermédiaire calibré.',
+    expA: 'Moyen : la poutre et la chaîne donnent de l’épaisseur, mais l’échelle monumentale reste timide.',
+    expB: 'Bon : la décroissance progressive des trois plateformes mesure objectivement l’éloignement.',
+    expC: 'Optimal : la cage cyclopéenne et la petite fenêtre d’auberge en contrebas écrasent littéralement le gobelin.',
+  },
+  {
+    criterion: '4. Cohérence avec le Fusain Abyssal',
+    initial: 'Moyenne : la trame Bayer systématique donne un aspect rétro numérique plutôt que frotté.',
+    expA: 'Forte : noirs profonds, traits gestuels brisés et poudre de craie sur les arêtes de fracture.',
+    expB: 'Correcte : la perspective 3D introduit des lignes géométriques qu’il faut casser manuellement au trait.',
+    expC: 'Excellente : grandes masses noires, estompe soustractive autour de la lanterne, blanc réservé aux repères.',
+  },
+  {
+    criterion: '5. Stabilité visuelle lors des déplacements',
+    initial: 'Fragile : la parallaxe à 4 vitesses attire l’œil sur le glissement du décor plutôt que le vertige.',
+    expA: 'Parfaite : zéro parallaxe, aucun décalage parasite entre la passerelle et le fond.',
+    expB: 'Très stable : le décalage borné suit une géométrie projetée cohérente sans cisaillement.',
+    expC: 'Bonne si le déplacement oblique reste subtil (≤ 2 px) et désactivable.',
+  },
+  {
+    criterion: '6. Compatibilité avec la génération procédurale',
+    initial: 'Limitée : les repères de worldGen.ts restent purement textuels et non positionnés dans le vide.',
+    expA: 'Immédiate : s’applique à n’importe quel contour de puits généré (balcon, fenêtre, corniche).',
+    expB: 'Exige un axe central de puits partagé entre étages et des coordonnées normalisées dans PitLandmark.',
+    expC: 'Bien adaptée dès lors que la zone de coupe dispose d’un rect de vide minimal (≥ 4 cases de large).',
+  },
+  {
+    criterion: '7. Complexité d’intégration dans DungeonCanvas',
+    initial: 'Déjà proche de l’existant, mais perpétue le découpage case par case dans drawPitTile().',
+    expA: 'Faible : remplace simplement drawPitTile() par une passe unifiée du contour de gouffre.',
+    expB: 'Moyenne : requiert un calcul de boîte englobante du puits et une projection par profondeur Z.',
+    expC: 'Moyenne : passe unique de rendu du puits avant les passerelles, avec table de repères multi-étages.',
+  },
 ];
-
-interface DustMote {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  maxLife: number;
-  size: number;
-  chalk: boolean;
-}
 
 interface PhaseCState {
   player: { x: number; y: number; facing: 1 | -1 };
@@ -174,37 +242,44 @@ function createInitialPhaseC(): PhaseCState {
     oil: 8,
     speaker: 'Observation',
     message:
-      'Vous quittez le seuil de l’auberge vers la passerelle du Grand Puits. Un Héros patrouille sur la corniche opposée.',
+      'Vous quittez le seuil de l’auberge vers la passerelle du Grand Puits. Basculez entre les 4 représentations (1–4) ou activez le comparatif 2×2 (K).',
   };
 }
 
-const TILE_PX = 24;
-const BUF_W = GRID_W * TILE_PX; // 336
-const BUF_H = GRID_H * TILE_PX; // 216
-
-// 4x4 Bayer ordered dithering threshold matrix (0..15) for non-retro charcoal shading
-const BAYER4 = [
-  0, 8, 2, 10,
-  12, 4, 14, 6,
-  3, 11, 1, 9,
-  15, 7, 13, 5,
-];
-
 export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) => {
-  const [activeTab, setActiveTab] = useState<'explore' | 'phase_c'>('explore');
+  const [activeTab, setActiveTab] = useState<'explore' | 'phase_c' | 'audit'>('phase_c');
   const [variation, setVariation] = useState<FusainVariationId>('gestuel');
+  const [experiment, setExperiment] = useState<PitExperimentId>('exp_c');
+  const [parallaxEnabled, setParallaxEnabled] = useState<boolean>(false);
+  const [compareGridMode, setCompareGridMode] = useState<boolean>(false);
+  const [frozenFrame, setFrozenFrame] = useState<boolean>(false);
   const [lightboxId, setLightboxId] = useState<FusainVariationId | null>(null);
   const [scene, setScene] = useState<PhaseCState>(() => createInitialPhaseC());
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pixelBufRef = useRef<HTMLCanvasElement | null>(null);
+  const compareCanvasRefs = useRef<Record<PitExperimentId, HTMLCanvasElement | null>>({
+    initial: null,
+    exp_a: null,
+    exp_b: null,
+    exp_c: null,
+  });
+  const bufInitialRef = useRef<HTMLCanvasElement | null>(null);
+  const bufHybridRef = useRef<HTMLCanvasElement | null>(null);
   const atlasRef = useRef<FusainPixelAtlas | null>(null);
+
   const sceneRef = useRef<PhaseCState>(scene);
   sceneRef.current = scene;
   const variationRef = useRef<FusainVariationId>(variation);
   variationRef.current = variation;
+  const experimentRef = useRef<PitExperimentId>(experiment);
+  experimentRef.current = experiment;
+  const parallaxRef = useRef<boolean>(parallaxEnabled);
+  parallaxRef.current = parallaxEnabled;
+  const compareGridRef = useRef<boolean>(compareGridMode);
+  compareGridRef.current = compareGridMode;
+  const frozenRef = useRef<boolean>(frozenFrame);
+  frozenRef.current = frozenFrame;
 
-  // Real-time physical animation state (not triggering React re-renders)
   const animRef = useRef({
     renderX: 3,
     renderY: 4,
@@ -223,9 +298,10 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
     heroStepTimer: 0,
     bridgeSagX: -1,
     bridgeSagTimer: 0,
-    footprints: [] as Array<{ x: number; y: number; life: number; chalk: boolean }>,
+    footprints: [] as FootprintMark[],
     motes: [] as DustMote[],
     lastTs: 0,
+    frozenTs: 0,
   });
 
   const spawnMotes = useCallback(
@@ -272,6 +348,7 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
       footprints: [],
       motes: [],
       lastTs: performance.now(),
+      frozenTs: performance.now(),
     };
   }, []);
 
@@ -283,7 +360,6 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
   const interactAt = useCallback(
     (tx: number, ty: number) => {
       const current = sceneRef.current;
-      // 1. Chest interaction (resists first, opens second)
       if (tx === current.chest.x && ty === current.chest.y) {
         if (current.chest.state === 'locked') {
           animRef.current.chestShake = 1;
@@ -296,7 +372,7 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
             chest: { ...prev.chest, state: 'resisted' },
             speaker: 'Coffre ferré',
             message:
-              'La serrure grippe dans un claquement sec ! Le coffre résiste et tremble sur le bord du vide. Réessayez pour forcer le pêne.',
+              'La serrure grippe dans un claquement sec ! Le coffre résiste et tremble sur l’éperon rocheux. Réessayez pour forcer le pêne.',
           }));
           return true;
         }
@@ -327,7 +403,6 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
         return true;
       }
 
-      // 2. Rat Percepteur reaction
       if (tx === current.rat.x && ty === current.rat.y) {
         animRef.current.ratFlinch = 1;
         spawnMotes(tx, ty, 3, false);
@@ -352,7 +427,6 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
         return true;
       }
 
-      // 3. Inn glowing window
       if (getSceneTile(tx, ty) === 'inn_window') {
         soundFx.pitClang();
         setScene((prev) => ({
@@ -364,14 +438,13 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
         return true;
       }
 
-      // 4. Grand Puits rim gaze
       if (getSceneTile(tx, ty) === 'pit') {
         soundFx.pitGaze();
         setScene((prev) => ({
           ...prev,
           speaker: 'Le Grand Puits',
           message:
-            'Aucune brume magique : seulement du noir pur, des passerelles filiformes et trois lumières minuscules suspendues très loin dessous.',
+            'Sous la margelle de roche cassée, les parois plongent vers des installations suspendues et une auberge minuscule tout en bas.',
         }));
         return true;
       }
@@ -388,7 +461,6 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
       const ny = current.player.y + dy;
       const facing: 1 | -1 = dx < 0 ? -1 : dx > 0 ? 1 : current.player.facing;
 
-      // Check interactive bump targets first
       if (
         (nx === current.chest.x && ny === current.chest.y) ||
         (nx === current.rat.x && ny === current.rat.y) ||
@@ -419,7 +491,6 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
       }
 
       animRef.current.stepPulse = 1;
-      // Leave faint boot print behind on stone/inn floor
       if (getSceneTile(current.player.x, current.player.y) !== 'bridge') {
         if (animRef.current.footprints.length >= 14) animRef.current.footprints.shift();
         animRef.current.footprints.push({
@@ -450,18 +521,18 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
 
         let speaker = 'Déplacement';
         let message =
-          'Vous progressez le long de la corniche. Appuyez sur Espace face à un élément pour agir.';
+          'Observez l’aplomb du vide depuis la corniche. Espace pour inspecter, 1–4 pour changer d’architecture.';
 
         if (tileKind === 'inn') {
           speaker = 'Refuge attenant';
           message =
-            'Sous le linteau de l’auberge, les lampes répandent une lueur tiède vers le couloir. Le Héros ne franchira pas ce seuil.';
+            'Sous le linteau de l’auberge, les lampes projettent un cône chaud vers le couloir. Le Héros ne franchira pas ce seuil.';
         } else if (tileKind === 'bridge') {
           speaker = 'Passerelle suspendue';
           message =
             distToHero <= 4
-              ? 'Les planches ploient au-dessus du vide tandis que la lueur aveuglante du Héros approche !'
-              : 'Sous vos pieds, la planche fléchit d’un souffle et laisse choir quelques grains de poussière dans le Puits.';
+              ? 'Les planches ploient au-dessus du puits tandis que la lueur aveuglante du Héros approche !'
+              : 'La passerelle franchit l’abîme et occulte les câbles qui plongent sous vos pieds.';
         } else if (distToHero <= 4) {
           speaker = 'Alerte silencieuse';
           message =
@@ -506,7 +577,6 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
       { x, y: y + 1 },
       { x: x - facing, y },
     ];
-    // Priority: Chest or Rat adjacent, then Window, then Pit rim
     const priorityTarget = candidates.find(
       (c) =>
         (c.x === current.chest.x && c.y === current.chest.y) ||
@@ -527,7 +597,6 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
     }));
   }, [interactAt]);
 
-  // Keyboard handling for Studio & Phase C
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (lightboxId) {
@@ -546,7 +615,9 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
 
       if (e.key === 'Tab') {
         e.preventDefault();
-        setActiveTab((prev) => (prev === 'explore' ? 'phase_c' : 'explore'));
+        setActiveTab((prev) =>
+          prev === 'phase_c' ? 'audit' : prev === 'audit' ? 'explore' : 'phase_c',
+        );
         return;
       }
 
@@ -568,6 +639,27 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
       } else if (e.key === ' ' || e.key === 'Enter' || key === 'e') {
         e.preventDefault();
         handlePhaseCAction();
+      } else if (key === '1') {
+        e.preventDefault();
+        setExperiment('initial');
+      } else if (key === '2') {
+        e.preventDefault();
+        setExperiment('exp_a');
+      } else if (key === '3') {
+        e.preventDefault();
+        setExperiment('exp_b');
+      } else if (key === '4') {
+        e.preventDefault();
+        setExperiment('exp_c');
+      } else if (key === 'p') {
+        e.preventDefault();
+        setParallaxEnabled((prev) => !prev);
+      } else if (key === 'k') {
+        e.preventDefault();
+        setCompareGridMode((prev) => !prev);
+      } else if (key === 'f') {
+        e.preventDefault();
+        setFrozenFrame((prev) => !prev);
       } else if (key === 'v') {
         e.preventDefault();
         setVariation((prev) =>
@@ -594,28 +686,23 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
     resetPhaseC,
   ]);
 
-  // Native 336x216 (24x24 tiles) Pixel-Art Charcoal & Chalk Renderer for Phase C
+  // Unified render loop supporting both single-view mode and synchronized 2x2 comparison grid
   useEffect(() => {
     if (activeTab !== 'phase_c') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
 
-    if (!pixelBufRef.current) {
-      const buf = document.createElement('canvas');
-      buf.width = BUF_W;
-      buf.height = BUF_H;
-      pixelBufRef.current = buf;
+    if (!bufInitialRef.current) {
+      bufInitialRef.current = document.createElement('canvas');
+    }
+    if (!bufHybridRef.current) {
+      bufHybridRef.current = document.createElement('canvas');
     }
     if (!atlasRef.current) {
       atlasRef.current = buildFusainPixelAtlas();
     }
 
-    const vCanvas = pixelBufRef.current;
-    const vctx = vCanvas.getContext('2d', { willReadFrequently: true });
-    if (!vctx) return;
     const atlas = atlasRef.current;
+    const bufInitial = bufInitialRef.current;
+    const bufHybrid = bufHybridRef.current;
 
     const prefersReducedMotion =
       typeof window !== 'undefined' &&
@@ -623,594 +710,127 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
 
     let rafId = 0;
 
-    // Integer pixel circle helper for distant giant Pit winch wheel
-    const drawPixelCircle = (cx: number, cy: number, r: number, color: string) => {
-      vctx.fillStyle = color;
-      let x = r;
-      let y = 0;
-      let err = 1 - x;
-      while (x >= y) {
-        vctx.fillRect(cx + x, cy + y, 1, 1);
-        vctx.fillRect(cx + y, cy + x, 1, 1);
-        vctx.fillRect(cx - y, cy + x, 1, 1);
-        vctx.fillRect(cx - x, cy + y, 1, 1);
-        vctx.fillRect(cx - x, cy - y, 1, 1);
-        vctx.fillRect(cx - y, cy - x, 1, 1);
-        vctx.fillRect(cx + y, cy - x, 1, 1);
-        vctx.fillRect(cx + x, cy - y, 1, 1);
-        y += 1;
-        if (err < 0) {
-          err += 2 * y + 1;
-        } else {
-          x -= 1;
-          err += 2 * (y - x) + 1;
-        }
-      }
-    };
-
     const renderFrame = (ts: number) => {
       const a = animRef.current;
-      const dt = a.lastTs ? Math.min(0.05, (ts - a.lastTs) / 1000) : 0.016;
+      const effectiveTs = frozenRef.current ? a.frozenTs || ts : ts;
+      if (!frozenRef.current) {
+        a.frozenTs = ts;
+      }
+      const dt =
+        frozenRef.current || !a.lastTs ? 0.016 : Math.min(0.05, (ts - a.lastTs) / 1000);
       a.lastTs = ts;
 
       const s = sceneRef.current;
+
+      if (!frozenRef.current) {
+        const targetX = s.player.x;
+        const targetY = s.player.y;
+        const dx = targetX - a.renderX;
+        const dy = targetY - a.renderY;
+        const dist = Math.hypot(dx, dy);
+
+        if (prefersReducedMotion) {
+          a.renderX = targetX;
+          a.renderY = targetY;
+          a.lanternX = targetX + s.player.facing * 0.34;
+          a.lanternY = targetY + 0.06;
+        } else {
+          a.renderX += dx * Math.min(1, dt * 15);
+          a.renderY += dy * Math.min(1, dt * 15);
+          if (dist > 0.02) {
+            a.walkPhase += dt * 18;
+          }
+          a.stepPulse = Math.max(0, a.stepPulse - dt * 5);
+
+          const handX = a.renderX + s.player.facing * 0.35;
+          const handY = a.renderY + 0.06 + Math.sin(effectiveTs * 0.0032) * 0.02;
+          const fx = (handX - a.lanternX) * 44;
+          const fy = (handY - a.lanternY) * 44;
+          a.lanternVx = (a.lanternVx + fx * dt) * Math.pow(0.04, dt);
+          a.lanternVy = (a.lanternVy + fy * dt) * Math.pow(0.04, dt);
+          a.lanternX += a.lanternVx * dt;
+          a.lanternY += a.lanternVy * dt;
+        }
+
+        a.chestShake = Math.max(0, a.chestShake - dt * 2.4);
+        const targetOpen = s.chest.state === 'open' ? 1 : 0;
+        a.chestOpenProgress += (targetOpen - a.chestOpenProgress) * Math.min(1, dt * 8);
+        a.ratFlinch = Math.max(0, a.ratFlinch - dt * 2.1);
+        a.heroPulse = Math.max(0, a.heroPulse - dt * 3);
+        a.heroStepTimer = Math.max(0, a.heroStepTimer - dt);
+        a.bridgeSagTimer = Math.max(0, a.bridgeSagTimer - dt);
+
+        const heroTarget = HERO_PATROL[s.heroStepIdx];
+        if (prefersReducedMotion) {
+          a.heroRenderX = heroTarget.x;
+          a.heroRenderY = heroTarget.y;
+        } else {
+          a.heroRenderX += (heroTarget.x - a.heroRenderX) * Math.min(1, dt * 7);
+          a.heroRenderY += (heroTarget.y - a.heroRenderY) * Math.min(1, dt * 7);
+        }
+
+        a.motes = a.motes.filter((m) => {
+          m.life += dt;
+          m.x += m.vx * dt;
+          m.y += m.vy * dt;
+          return m.life < m.maxLife;
+        });
+        a.footprints = a.footprints
+          .map((f) => ({ ...f, life: f.life - dt }))
+          .filter((f) => f.life > 0);
+      }
+
+      const snapshot: SceneRenderSnapshot = {
+        player: s.player,
+        renderX: a.renderX,
+        renderY: a.renderY,
+        walkPhase: a.walkPhase,
+        stepPulse: a.stepPulse,
+        lanternX: a.lanternX,
+        lanternY: a.lanternY,
+        chest: s.chest,
+        chestShake: a.chestShake,
+        rat: s.rat,
+        ratFlinch: a.ratFlinch,
+        heroStepIdx: s.heroStepIdx,
+        heroRenderX: a.heroRenderX,
+        heroRenderY: a.heroRenderY,
+        heroStepTimer: a.heroStepTimer,
+        bridgeSagX: a.bridgeSagX,
+        bridgeSagTimer: a.bridgeSagTimer,
+        footprints: a.footprints,
+        motes: a.motes,
+        ts: effectiveTs,
+        prefersReducedMotion: prefersReducedMotion || frozenRef.current,
+        parallaxEnabled: parallaxRef.current,
+      };
+
       const mode = variationRef.current;
 
-      // Update physical interpolation
-      const targetX = s.player.x;
-      const targetY = s.player.y;
-      const dx = targetX - a.renderX;
-      const dy = targetY - a.renderY;
-      const dist = Math.hypot(dx, dy);
-
-      if (prefersReducedMotion) {
-        a.renderX = targetX;
-        a.renderY = targetY;
-        a.lanternX = targetX + s.player.facing * 0.34;
-        a.lanternY = targetY + 0.06;
-      } else {
-        a.renderX += dx * Math.min(1, dt * 15);
-        a.renderY += dy * Math.min(1, dt * 15);
-        if (dist > 0.02) {
-          a.walkPhase += dt * 18;
-        }
-        a.stepPulse = Math.max(0, a.stepPulse - dt * 5);
-
-        // Spring-lag lantern physics behind goblin hand
-        const handX = a.renderX + s.player.facing * 0.35;
-        const handY = a.renderY + 0.06 + Math.sin(ts * 0.0032) * 0.02;
-        const fx = (handX - a.lanternX) * 44;
-        const fy = (handY - a.lanternY) * 44;
-        a.lanternVx = (a.lanternVx + fx * dt) * Math.pow(0.04, dt);
-        a.lanternVy = (a.lanternVy + fy * dt) * Math.pow(0.04, dt);
-        a.lanternX += a.lanternVx * dt;
-        a.lanternY += a.lanternVy * dt;
-      }
-
-      a.chestShake = Math.max(0, a.chestShake - dt * 2.4);
-      const targetOpen = s.chest.state === 'open' ? 1 : 0;
-      a.chestOpenProgress += (targetOpen - a.chestOpenProgress) * Math.min(1, dt * 8);
-      a.ratFlinch = Math.max(0, a.ratFlinch - dt * 2.1);
-      a.heroPulse = Math.max(0, a.heroPulse - dt * 3);
-      a.heroStepTimer = Math.max(0, a.heroStepTimer - dt);
-      a.bridgeSagTimer = Math.max(0, a.bridgeSagTimer - dt);
-
-      const heroTarget = HERO_PATROL[s.heroStepIdx];
-      if (prefersReducedMotion) {
-        a.heroRenderX = heroTarget.x;
-        a.heroRenderY = heroTarget.y;
-      } else {
-        a.heroRenderX += (heroTarget.x - a.heroRenderX) * Math.min(1, dt * 7);
-        a.heroRenderY += (heroTarget.y - a.heroRenderY) * Math.min(1, dt * 7);
-      }
-
-      // Sparse 1x1 pixel dust motes & footprints decay
-      a.motes = a.motes.filter((m) => {
-        m.life += dt;
-        m.x += m.vx * dt;
-        m.y += m.vy * dt;
-        return m.life < m.maxLife;
-      });
-      a.footprints = a.footprints
-        .map((f) => ({ ...f, life: f.life - dt }))
-        .filter((f) => f.life > 0);
-
-      // === PASS 1: DRAW ON NATIVE 336x216 INTEGER PIXEL BUFFER ===
-      vctx.imageSmoothingEnabled = false;
-      vctx.fillStyle = '#040404';
-      vctx.fillRect(0, 0, BUF_W, BUF_H);
-
-      // Camera offset for multi-layer depth parallax
-      const camDx = a.renderX - 6;
-      const camDy = a.renderY - 4;
-
-      // 1A. GRAND PUITS — 4-Strata Vertical Parallax Shaft (x=6..11, y=1..7)
-      const pitX = 6 * TILE_PX;
-      const pitY = 1 * TILE_PX;
-      const pitW = 6 * TILE_PX;
-      const pitH = 7 * TILE_PX;
-
-      vctx.save();
-      vctx.beginPath();
-      vctx.rect(pitX, pitY, pitW, pitH);
-      vctx.clip();
-
-      vctx.fillStyle = '#030303';
-      vctx.fillRect(pitX, pitY, pitW, pitH);
-
-      // Stratum -4 (deepest void: massive faint buttress ribs + drifting abyssal specks, 0.18x parallax)
-      const p4x = Math.round(camDx * 1.1);
-      const p4y = Math.round(camDy * 1.1);
-      vctx.fillStyle = '#0C0C0B';
-      vctx.fillRect(pitX + 18 - p4x, pitY, 8, pitH);
-      vctx.fillRect(pitX + pitW - 26 - p4x, pitY, 10, pitH);
-      // Distant horizontal stone arch girder
-      vctx.fillStyle = '#100F0E';
-      vctx.fillRect(pitX, pitY + Math.round(pitH * 0.8) - p4y, pitW, 5);
-
-      // Stratum -3 (deep giant counterweight wheel & heavy beam, 0.38x parallax)
-      const p3x = Math.round(camDx * 2.2);
-      const p3y = Math.round(camDy * 2.2);
-      const wheelX = Math.round(pitX + pitW * 0.58 - p3x);
-      const wheelY = Math.round(pitY + pitH * 0.65 - p3y);
-      drawPixelCircle(wheelX, wheelY, 24, '#1B1A18');
-      drawPixelCircle(wheelX, wheelY, 13, '#151412');
-      // Wheel spokes
-      vctx.fillStyle = '#181715';
-      vctx.fillRect(wheelX - 23, wheelY, 46, 1);
-      vctx.fillRect(wheelX, wheelY - 23, 1, 46);
-      vctx.fillStyle = '#171614';
-      vctx.fillRect(pitX + 6 - p3x, wheelY + 14, pitW - 12, 2);
-
-      // Stratum -2 (swaying vertical chains, suspended catwalk & wooden hoist arm, 0.62x parallax)
-      const p2x = Math.round(camDx * 3.6);
-      const p2y = Math.round(camDy * 3.6);
-      const chainCols = [0.21, 0.46, 0.79];
-      chainCols.forEach((ratio, idx) => {
-        const sway = prefersReducedMotion ? 0 : Math.round(Math.sin(ts * 0.0014 + idx * 1.8));
-        const cx = Math.round(pitX + pitW * ratio - p2x) + sway;
-        vctx.fillStyle = idx === 1 ? '#36332E' : '#262421';
-        for (let py = pitY; py < pitY + pitH; py += 4) {
-          vctx.fillRect(cx, py, idx === 1 ? 2 : 1, 2);
-        }
-      });
-
-      const farWalkY = Math.round(pitY + pitH * 0.23 - p2y);
-      vctx.fillStyle = '#171614';
-      vctx.fillRect(pitX, farWalkY, pitW, 5);
-      vctx.fillStyle = '#403D37';
-      vctx.fillRect(pitX, farWalkY, pitW, 1);
-      // Tiny handrail posts on distant catwalk
-      for (let rx = pitX + 6; rx < pitX + pitW; rx += 16) {
-        vctx.fillRect(rx - p2x, farWalkY - 3, 1, 3);
-      }
-
-      // Stratum -1 (just below ledges: vertical rock cliff faces & under-bridge timber brackets, 0.88x parallax)
-      const p1y = Math.round(camDy * 4.8);
-      // Top ledge cliff face descending into pit (under row 0 walls & chest spur)
-      vctx.fillStyle = '#121110';
-      vctx.fillRect(pitX, pitY, pitW, 9);
-      vctx.fillStyle = '#22201D';
-      for (let sx = pitX + 2; sx < pitX + pitW - 2; sx += 7) {
-        vctx.fillRect(sx, pitY + 2, 1, 6);
-      }
-      // Left chasm rock wall drop-off beside bridge
-      vctx.fillStyle = '#151412';
-      vctx.fillRect(pitX, pitY, 6, pitH);
-      vctx.fillStyle = '#282622';
-      vctx.fillRect(pitX + 5, pitY + 4, 1, pitH - 8);
-      // Timber support struts under the chest spur (x=7, y=4 top)
-      vctx.fillStyle = '#2B251E';
-      vctx.fillRect(7 * TILE_PX + 4, 4 * TILE_PX - 1 - Math.round(p1y * 0.2), 2, 7);
-      vctx.fillRect(7 * TILE_PX + 18, 4 * TILE_PX - 1 - Math.round(p1y * 0.2), 2, 7);
-
-      // Slow updraft ash wisps rising from the Pit + 1x1 distant pinpoint lights
-      for (let w = 0; w < 8; w++) {
-        const wSpeed = 0.008 + (w % 3) * 0.005;
-        const wyFrac = prefersReducedMotion ? (w * 0.13) % 1 : (1 - ((ts * wSpeed * 0.01 + w * 0.19) % 1));
-        const wx = Math.round(pitX + ((w * 37 + 15) % (pitW - 12)) - p3x);
-        const wy = Math.round(pitY + wyFrac * pitH);
-        vctx.fillStyle = w % 2 === 0 ? '#4B4842' : '#2E2C28';
-        vctx.fillRect(wx, wy, 1, w % 3 === 0 ? 2 : 1);
-      }
-
-      const pinpoints = [
-        { rx: 0.32, ry: 0.78, phase: 0.4 },
-        { rx: 0.68, ry: 0.62, phase: 2.1 },
-        { rx: 0.51, ry: 0.87, phase: 4.3 },
-        { rx: 0.25, ry: 0.16, phase: 1.7 },
-      ];
-      pinpoints.forEach((pt) => {
-        const on = prefersReducedMotion || Math.sin(ts * 0.0028 + pt.phase) > -0.35;
-        if (!on) return;
-        const px = Math.round(pitX + pitW * pt.rx - p3x);
-        const py = Math.round(pitY + pitH * pt.ry - p3y);
-        vctx.fillStyle = '#FAF8F5';
-        vctx.fillRect(px, py, 1, 1);
-      });
-
-      vctx.restore();
-
-      // 1B. Draw Pixel Tiles (Base Floors, Inn Refuge, Fragile Bridge, Wall Bases)
-      // Elevated walls also draw a subtle 1.12x parallax cap in 1B-2 so height reads immediately!
-      const wallCapOffX = Math.max(-2, Math.min(2, Math.round(camDx * 0.55)));
-      const wallCapOffY = Math.max(-2, Math.min(2, Math.round(camDy * 0.55)));
-
-      for (let ty = 0; ty < GRID_H; ty++) {
-        for (let tx = 0; tx < GRID_W; tx++) {
-          const kind = getSceneTile(tx, ty);
-          const px = tx * TILE_PX;
-          const py = ty * TILE_PX;
-
-          if (kind === 'pit') {
-            // Crisp 1px chalk-dusted parapet along ledges bordering the Pit
-            vctx.fillStyle = mode === 'contraste' ? '#A8A298' : '#78726A';
-            if (isWalkable(tx, ty - 1)) vctx.fillRect(px, py, TILE_PX, 1);
-            if (isWalkable(tx, ty + 1)) vctx.fillRect(px, py + TILE_PX - 1, TILE_PX, 1);
-            if (isWalkable(tx - 1, ty)) vctx.fillRect(px, py, 1, TILE_PX);
-            if (isWalkable(tx + 1, ty)) vctx.fillRect(px + TILE_PX - 1, py, 1, TILE_PX);
-            continue;
-          }
-
-          if (kind === 'inn_window') {
-            vctx.drawImage(atlas.innWindow, px, py);
-            continue;
-          }
-
-          if (kind === 'wall') {
-            // Lower wall cliff base (gives shadow relief)
-            vctx.fillStyle = '#060606';
-            vctx.fillRect(px, py, TILE_PX, TILE_PX);
-
-            // Upper wall crown shifted with 1.12x parallax to express vertical wall height!
-            const capX = px + wallCapOffX;
-            const capY = py + wallCapOffY - 2;
-            vctx.fillStyle = '#0D0C0B';
-            vctx.fillRect(capX, capY, TILE_PX, TILE_PX);
-
-            for (let i = 0; i < 8; i++) {
-              const rx = Math.floor(hash2D(tx, ty, i + 2) * (TILE_PX - 4)) + 2;
-              const ry = Math.floor(hash2D(tx, ty, i + 15) * (TILE_PX - 4)) + 2;
-              vctx.fillStyle = mode === 'gestuel' ? '#2A2825' : '#1B1A18';
-              vctx.fillRect(capX + rx, capY + ry, mode === 'gestuel' ? 3 : 2, 1);
-            }
-
-            // Broken hand-pixeled chalk rim ONLY along edges touching walkable tiles
-            const rimColor = mode === 'contraste' ? '#A8A298' : '#78726A';
-            vctx.fillStyle = rimColor;
-            for (let k = 0; k < TILE_PX; k++) {
-              if (mode === 'gestuel' && hash2D(tx + k, ty, 33) < 0.16) continue;
-              if (isWalkable(tx, ty + 1)) vctx.fillRect(capX + k, capY + TILE_PX - 1, 1, 1);
-              if (isWalkable(tx, ty - 1)) vctx.fillRect(capX + k, capY, 1, 1);
-              if (isWalkable(tx + 1, ty)) vctx.fillRect(capX + TILE_PX - 1, capY + k, 1, 1);
-              if (isWalkable(tx - 1, ty)) vctx.fillRect(capX, capY + k, 1, 1);
-            }
-            continue;
-          }
-
-          if (kind === 'inn') {
-            // Warm dusty floorboards inside the sheltered alcove
-            vctx.fillStyle = '#33281E';
-            vctx.fillRect(px, py, TILE_PX, TILE_PX);
-            vctx.fillStyle = '#1E1812';
-            vctx.fillRect(px, py + 7, TILE_PX, 1);
-            vctx.fillRect(px, py + 15, TILE_PX, 1);
-            vctx.fillRect(px, py + 23, TILE_PX, 1);
-            vctx.fillStyle = '#564331';
-            vctx.fillRect(px + 3, py + 2, 6, 1);
-            vctx.fillRect(px + 13, py + 10, 7, 1);
-            vctx.fillRect(px + 5, py + 18, 5, 1);
-            continue;
-          }
-
-          if (kind === 'bridge') {
-            const sag = a.bridgeSagTimer > 0 && a.bridgeSagX === tx ? 1 : 0;
-            vctx.drawImage(atlas.bridge, px, py + sag);
-            continue;
-          }
-
-          // Walkable stone ledge ('floor'): dithered graphite base + charcoal grain
-          vctx.fillStyle = mode === 'contraste' ? '#1E1D1B' : '#24221F';
-          vctx.fillRect(px, py, TILE_PX, TILE_PX);
-
-          for (let i = 0; i < (mode === 'gestuel' ? 11 : 6); i++) {
-            const rx = Math.floor(hash2D(tx, ty, i + 40) * (TILE_PX - 3)) + 1;
-            const ry = Math.floor(hash2D(tx, ty, i + 60) * (TILE_PX - 2)) + 1;
-            vctx.fillStyle = i % 2 === 0 ? '#141312' : '#33302C';
-            vctx.fillRect(px + rx, py + ry, mode === 'gestuel' && i % 3 === 0 ? 3 : 1, 1);
-          }
-        }
-      }
-
-      // Draw hanging oil lamps inside the Inn alcove (signifying exact light source positions)
-      const lampFrame =
-        !prefersReducedMotion && Math.floor(ts / 280) % 2 === 0 ? atlas.innLampA : atlas.innLampB;
-      vctx.drawImage(lampFrame, 1 * TILE_PX + 2, 3 * TILE_PX + 1);
-      vctx.drawImage(lampFrame, 2 * TILE_PX + 10, 3 * TILE_PX + 1);
-
-      // Draw fading boot footprints (dark charcoal for goblin, bright chalk scuff for Hero!)
-      a.footprints.forEach((fp) => {
-        const px = fp.x * TILE_PX + 9;
-        const py = fp.y * TILE_PX + 19;
-        vctx.fillStyle = fp.chalk
-          ? fp.life > 2.5
-            ? '#FAF8F5'
-            : '#A8A298'
-          : fp.life > 2
-          ? '#100F0E'
-          : '#1A1816';
-        vctx.fillRect(px, py, 2, 1);
-        vctx.fillRect(px + 4, py + 1, 2, 1);
-      });
-
-      // 1C. Chest Sprite (locked / resisted shake / open + persistent chalk glint when open)
-      {
-        const shakePx =
-          a.chestShake > 0 ? Math.round(Math.sin(ts * 0.08) * a.chestShake * 2) : 0;
-        const cx = s.chest.x * TILE_PX + shakePx;
-        const cy = s.chest.y * TILE_PX;
-        const chestSprite =
-          s.chest.state === 'open'
-            ? atlas.chestOpen
-            : s.chest.state === 'resisted' && a.chestShake > 0.1
-            ? atlas.chestResist
-            : atlas.chestLocked;
-        vctx.drawImage(chestSprite, cx, cy);
-        if (s.chest.state === 'open' && !prefersReducedMotion && Math.floor(ts / 350) % 2 === 0) {
-          vctx.fillStyle = '#FAF8F5';
-          vctx.fillRect(cx + 12, cy + 8, 1, 1);
-        }
-      }
-
-      // 1D. Rat Percepteur Sprite (idle / scribbling / startled hop / tail twitch)
-      {
-        const heroPosNow = HERO_PATROL[s.heroStepIdx];
-        const heroNearRat =
-          Math.abs(heroPosNow.x - s.rat.x) + Math.abs(heroPosNow.y - s.rat.y) <= 6;
-        const hopPx =
-          a.ratFlinch > 0 ? Math.round(Math.abs(Math.sin(a.ratFlinch * Math.PI * 2)) * 3) : 0;
-        const shiverPx =
-          heroNearRat && !prefersReducedMotion ? (Math.floor(ts / 110) % 2 === 0 ? 0 : 1) : 0;
-        const rx = s.rat.x * TILE_PX + shiverPx;
-        const ry = s.rat.y * TILE_PX - hopPx;
-        const isScribbling = !prefersReducedMotion && Math.floor(ts / 550) % 4 === 0;
-        const ratSprite =
-          a.ratFlinch > 0.15
-            ? atlas.ratStartled
-            : isScribbling
-            ? atlas.ratScribble
-            : atlas.ratIdle;
-        vctx.drawImage(ratSprite, rx, ry);
-      }
-
-      // 1E. Approaching Blinding HERO Sprite (24x28 tall + bright stride + blade shimmer)
-      const hx = Math.round(a.heroRenderX * TILE_PX);
-      const hy = Math.round(a.heroRenderY * TILE_PX) - 4;
-      const heroSprite =
-        a.heroStepTimer > 0 && Math.floor(ts / 110) % 2 === 0 ? atlas.heroStride : atlas.hero;
-      vctx.drawImage(heroSprite, hx, hy);
-      // Specular sword-tip glint
-      if (!prefersReducedMotion && Math.floor(ts / 220) % 3 === 0) {
-        vctx.fillStyle = '#FAF8F5';
-        vctx.fillRect(hx + 2, hy + 2, 2, 1);
-        vctx.fillRect(hx + 3, hy + 1, 1, 3);
-      }
-
-      // 1F. Playable Goblin Sprite + Breathing/Blink + Physically Lagged Lantern Sprite
-      const heroPos = HERO_PATROL[s.heroStepIdx];
-      const heroDist = Math.abs(heroPos.x - s.player.x) + Math.abs(heroPos.y - s.player.y);
-      const fear = heroDist <= 4 && getSceneTile(s.player.x, s.player.y) !== 'inn';
-      const bobPx = prefersReducedMotion
-        ? 0
-        : Math.round(Math.abs(Math.sin(a.walkPhase)) * a.stepPulse * 2);
-      const breathPx =
-        !prefersReducedMotion && a.stepPulse < 0.05 && Math.sin(ts * 0.003) > 0.88 ? -1 : 0;
-      const fearPx = fear && !prefersReducedMotion ? (Math.floor(ts / 85) % 2 === 0 ? -1 : 1) : 0;
-
-      const gx = Math.round(a.renderX * TILE_PX) + fearPx;
-      const gy = Math.round(a.renderY * TILE_PX) - bobPx + breathPx;
-      const isBlinking = !prefersReducedMotion && Math.floor(ts / 180) % 19 === 0;
-
-      let goblinSprite = isBlinking ? atlas.goblinBlink : atlas.goblinIdle;
-      if (fear && a.stepPulse < 0.15) {
-        goblinSprite = atlas.goblinScared;
-      } else if (a.stepPulse > 0.12) {
-        goblinSprite = Math.sin(a.walkPhase) >= 0 ? atlas.goblinWalkA : atlas.goblinWalkB;
-      }
-
-      vctx.save();
-      if (s.player.facing === -1) {
-        vctx.translate(gx + TILE_PX, gy);
-        vctx.scale(-1, 1);
-        vctx.drawImage(goblinSprite, 0, 0);
-      } else {
-        vctx.drawImage(goblinSprite, gx, gy);
-      }
-      vctx.restore();
-
-      // Subtle 1px red-oxide '!' above scared goblin
-      if (fear) {
-        vctx.fillStyle = '#9E3D35';
-        vctx.fillRect(gx + 11, gy - 5, 2, 4);
-        vctx.fillRect(gx + 11, gy, 2, 1);
-      }
-
-      // Lagging pixel lantern + 1px cord to goblin hand
-      const lx = Math.round(a.lanternX * TILE_PX + TILE_PX * 0.5);
-      const ly = Math.round(a.lanternY * TILE_PX + TILE_PX * 0.5);
-      const handPxX = gx + (s.player.facing === 1 ? 15 : 8);
-      const handPxY = gy + 12;
-
-      vctx.fillStyle = '#A8A298';
-      vctx.fillRect(Math.round((handPxX + lx) / 2), Math.round((handPxY + ly - 2) / 2), 1, 1);
-
-      const lanternSprite =
-        !prefersReducedMotion && Math.floor(ts / 240) % 2 === 0
-          ? atlas.lanternA
-          : atlas.lanternB;
-      vctx.drawImage(lanternSprite, lx - 4, ly - 4);
-
-      // Sparse 1x1 dust motes
-      a.motes.forEach((m) => {
-        vctx.fillStyle = m.chalk ? '#FAF8F5' : '#8A857C';
-        vctx.fillRect(
-          Math.round((m.x + 0.5) * TILE_PX),
-          Math.round((m.y + 0.5) * TILE_PX),
-          1,
-          1,
-        );
-      });
-
-      // === PASS 2: SUBTRACTIVE BAYER-DITHERED CHARCOAL LIGHTING + DIRECTIONAL INN CONES + BLINDING HERO AURA ===
-      const img = vctx.getImageData(0, 0, BUF_W, BUF_H);
-      const data = img.data;
-
-      const flicker = prefersReducedMotion ? 0 : Math.sin(ts * 0.011) * 2.2;
-      const lightRadiusPx =
-        (mode === 'atmospherique' ? 78 : mode === 'gestuel' ? 68 : 58) + flicker;
-      const heroCenterX = hx + 12;
-      const heroCenterY = hy + 14;
-      const heroAuraRadius = 46;
-
-      // Inn lamp & directional window beam origins
-      const lamp1X = 1 * TILE_PX + 8;
-      const lamp1Y = 3 * TILE_PX + 7;
-      const lamp2X = 2 * TILE_PX + 16;
-      const lamp2Y = 3 * TILE_PX + 7;
-      const win1X = 3 * TILE_PX + 20;
-      const win1Y = 3 * TILE_PX + 12;
-      const win2X = 3 * TILE_PX + 20;
-      const win2Y = 5 * TILE_PX + 12;
-
-      for (let py = 0; py < BUF_H; py++) {
-        const bayerRow = (py & 3) * 4;
-        for (let px = 0; px < BUF_W; px++) {
-          const idx = (py * BUF_W + px) * 4;
-          const r = data[idx];
-          const g = data[idx + 1];
-          const b = data[idx + 2];
-
-          const isChalkEvent = r >= 240 && g >= 235 && b >= 225;
-          if (isChalkEvent) continue;
-
-          // Keep Pit abyss interior strata untouched (except bridge & chest spur)
-          const inPitInterior =
-            px >= pitX + 2 && px < pitX + pitW - 2 && py >= pitY + 2 && py < pitY + pitH - 2;
-          const isBridgeBand = py >= 4 * TILE_PX + 6 && py <= 4 * TILE_PX + 19;
-          const isChestSpur =
-            px >= 7 * TILE_PX && px < 8 * TILE_PX && py >= 3 * TILE_PX && py < 4 * TILE_PX;
-          if (inPitInterior && !isBridgeBand && !isChestSpur) {
-            continue;
-          }
-
-          const dl = Math.hypot(px - lx, py - ly);
-          const lanternFactor = Math.max(0, 1 - dl / lightRadiusPx);
-
-          // Inn lamps illuminating inside the refuge
-          const dLamp1 = Math.hypot(px - lamp1X, py - lamp1Y);
-          const dLamp2 = Math.hypot(px - lamp2X, py - lamp2Y);
-          const innInteriorLight = Math.max(
-            Math.max(0, 1 - dLamp1 / 38),
-            Math.max(0, 1 - dLamp2 / 42),
+      if (compareGridRef.current) {
+        (['initial', 'exp_a', 'exp_b', 'exp_c'] as PitExperimentId[]).forEach((expId) => {
+          const targetCanvas = compareCanvasRefs.current[expId];
+          if (!targetCanvas) return;
+          renderPhaseCFrame(
+            targetCanvas,
+            expId === 'initial' ? bufInitial : bufHybrid,
+            atlas,
+            expId,
+            mode,
+            snapshot,
           );
-
-          // Directional warm amber cones spilling RIGHTWARD out of the two barred Inn windows
-          let windowCone = 0;
-          if (px >= win1X - 4) {
-            const dx1 = px - win1X;
-            const dy1 = Math.abs(py - win1Y);
-            if (dx1 >= 0 && dx1 < 52 && dy1 < 8 + dx1 * 0.42) {
-              windowCone = Math.max(windowCone, (1 - dx1 / 52) * (1 - dy1 / (8 + dx1 * 0.42)) * 0.95);
-            }
-          }
-          if (px >= win2X - 4) {
-            const dx2 = px - win2X;
-            const dy2 = Math.abs(py - win2Y);
-            if (dx2 >= 0 && dx2 < 52 && dy2 < 8 + dx2 * 0.42) {
-              windowCone = Math.max(windowCone, (1 - dx2 / 52) * (1 - dy2 / (8 + dx2 * 0.42)) * 0.95);
-            }
-          }
-
-          // Hero blinding luminous aura (pierces darkness around the Hero!)
-          const dHero = Math.hypot(px - heroCenterX, py - heroCenterY);
-          const heroFactor = Math.max(0, 1 - dHero / heroAuraRadius);
-
-          const vis = Math.min(1, Math.max(lanternFactor, innInteriorLight, windowCone, heroFactor));
-          const threshold = (BAYER4[bayerRow + (px & 3)] + 0.5) / 16;
-
-          // Warm amber tint inside Inn lamps & directional window beams
-          const warmStrength = Math.max(innInteriorLight, windowCone);
-          let outR = r;
-          let outG = g;
-          let outB = b;
-
-          if (warmStrength > threshold * 0.45 && (outR > 12 || outG > 12)) {
-            outR = Math.min(250, outR + Math.round(warmStrength * 28));
-            outG = Math.min(240, outG + Math.round(warmStrength * 16));
-            outB = Math.max(5, outB - Math.round(warmStrength * 4));
-          }
-
-          // Blinding chalk-white overexposure near the Hero
-          if (heroFactor > 0.25 && heroFactor > threshold * 0.65 && (outR > 10 || outG > 10)) {
-            const glare = Math.round((heroFactor - 0.2) * 95);
-            outR = Math.min(250, outR + glare);
-            outG = Math.min(248, outG + glare);
-            outB = Math.min(245, outB + glare);
-          }
-
-          if (mode === 'contraste') {
-            if (vis < 0.14 || (vis < 0.38 && vis < threshold * 0.55)) {
-              outR = 5;
-              outG = 5;
-              outB = 5;
-            }
-          } else {
-            if (vis < 0.08) {
-              outR = 5;
-              outG = 5;
-              outB = 5;
-            } else if (vis < threshold * 0.68) {
-              outR = Math.max(5, outR >> 2);
-              outG = Math.max(5, outG >> 2);
-              outB = Math.max(5, outB >> 2);
-            } else if (vis < threshold * 0.92) {
-              outR = Math.max(5, (outR * 3) >> 2);
-              outG = Math.max(5, (outG * 3) >> 2);
-              outB = Math.max(5, (outB * 3) >> 2);
-            }
-          }
-
-          data[idx] = outR;
-          data[idx + 1] = outG;
-          data[idx + 2] = outB;
-        }
+        });
+      } else if (canvasRef.current) {
+        const activeExp = experimentRef.current;
+        renderPhaseCFrame(
+          canvasRef.current,
+          activeExp === 'initial' ? bufInitial : bufHybrid,
+          atlas,
+          activeExp,
+          mode,
+          snapshot,
+        );
       }
-      vctx.putImageData(img, 0, 0);
-
-      // === PASS 3: CRISP NEAREST-NEIGHBOR BLIT TO DISPLAY CANVAS ===
-      const dpr = window.devicePixelRatio || 1;
-      const cssW = canvas.clientWidth || 784;
-      const cssH = canvas.clientHeight || 504;
-      const targetW = Math.round(cssW * dpr);
-      const targetH = Math.round(cssH * dpr);
-      if (canvas.width !== targetW || canvas.height !== targetH) {
-        canvas.width = targetW;
-        canvas.height = targetH;
-      }
-
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.imageSmoothingEnabled = false;
-      ctx.fillStyle = '#050505';
-      ctx.fillRect(0, 0, targetW, targetH);
-
-      const scale = Math.min(targetW / BUF_W, targetH / BUF_H);
-      const drawW = Math.round(BUF_W * scale);
-      const drawH = Math.round(BUF_H * scale);
-      const drawX = Math.floor((targetW - drawW) / 2);
-      const drawY = Math.floor((targetH - drawH) / 2);
-      ctx.drawImage(vCanvas, drawX, drawY, drawW, drawH);
-      ctx.restore();
 
       rafId = requestAnimationFrame(renderFrame);
     };
@@ -1219,9 +839,9 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
     return () => cancelAnimationFrame(rafId);
   }, [activeTab]);
 
-  const activeSpec = useMemo(
-    () => VARIATIONS.find((v) => v.id === variation) ?? VARIATIONS[0],
-    [variation],
+  const activeExperimentSpec = useMemo(
+    () => EXPERIMENTS.find((e) => e.id === experiment) ?? EXPERIMENTS[3],
+    [experiment],
   );
   const lightboxSpec = useMemo(
     () => VARIATIONS.find((v) => v.id === lightboxId) ?? null,
@@ -1231,32 +851,31 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
   const heroPos = HERO_PATROL[scene.heroStepIdx];
   const heroDistance = Math.abs(heroPos.x - scene.player.x) + Math.abs(heroPos.y - scene.player.y);
   const inInn = getSceneTile(scene.player.x, scene.player.y) === 'inn';
+  const effectiveParallax = experiment === 'exp_a' ? false : parallaxEnabled;
 
   return (
     <div className="min-h-screen bg-[#0B0B0B] text-[#E9E5DC]">
-      {/* Sober, utilitarian top bar — no medieval ornament */}
       <header className="border-b border-[#242424] bg-[#0F0F0F]">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-4 min-w-0">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-4">
             <button
               type="button"
               onClick={onBack}
-              className="flex min-h-[40px] items-center gap-2 border border-[#2C2C2C] bg-[#161616] px-3 py-1.5 text-xs font-medium text-[#E9E5DC] transition-colors hover:border-[#6A6760] hover:bg-[#1E1E1E] whitespace-nowrap shrink-0"
+              className="flex min-h-[40px] shrink-0 items-center gap-2 whitespace-nowrap border border-[#2C2C2C] bg-[#161616] px-3 py-1.5 text-xs font-medium text-[#E9E5DC] transition-colors hover:border-[#6A6760] hover:bg-[#1E1E1E]"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Retour</span>
             </button>
-            <h1 className="font-display text-base font-bold tracking-tight text-[#FAF8F5] truncate sm:text-lg">
-              Direction artistique · Fusain Abyssal
+            <h1 className="font-display truncate text-base font-bold tracking-tight text-[#FAF8F5] sm:text-lg">
+              Fusain Studio · Représentation du Grand Puits
             </h1>
           </div>
 
-          {/* Segmented phase switcher */}
-          <div className="flex items-center gap-1 border border-[#2A2A2A] bg-[#141414] p-1">
+          <div className="flex flex-wrap items-center gap-1 border border-[#2A2A2A] bg-[#141414] p-1">
             <button
               type="button"
               onClick={() => setActiveTab('explore')}
-              className={`min-h-[36px] px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+              className={`min-h-[36px] shrink-0 whitespace-nowrap px-3 py-1.5 text-xs font-medium transition-colors ${
                 activeTab === 'explore'
                   ? 'bg-[#FAF8F5] text-[#0A0A0A]'
                   : 'text-[#A39E95] hover:text-[#FAF8F5]'
@@ -1267,42 +886,52 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
             <button
               type="button"
               onClick={() => setActiveTab('phase_c')}
-              className={`flex min-h-[36px] items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+              className={`flex min-h-[36px] shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium transition-colors ${
                 activeTab === 'phase_c'
                   ? 'bg-[#FAF8F5] text-[#0A0A0A]'
                   : 'text-[#A39E95] hover:text-[#FAF8F5]'
               }`}
             >
               <Play className="h-3 w-3" aria-hidden="true" />
-              <span>Phase C · Test pixel-art 24×24</span>
+              <span>Expérimentations Puits</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('audit')}
+              className={`flex min-h-[36px] shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium transition-colors ${
+                activeTab === 'audit'
+                  ? 'bg-[#FAF8F5] text-[#0A0A0A]'
+                  : 'text-[#A39E95] hover:text-[#FAF8F5]'
+              }`}
+            >
+              <FileSearch className="h-3 w-3" aria-hidden="true" />
+              <span>Audit &amp; Évaluation (7 critères)</span>
             </button>
           </div>
         </div>
       </header>
 
-      {activeTab === 'explore' ? (
+      {activeTab === 'explore' && (
         <main className="mx-auto max-w-6xl space-y-10 px-4 py-8 sm:px-6">
-          {/* Brief Manifesto Strip */}
           <section className="flex flex-col justify-between gap-4 border-b border-[#242424] pb-6 md:flex-row md:items-end">
             <div className="space-y-2">
               <p className="font-mono-num text-xs text-[#9C978E]">
                 Le noir est un espace · Le blanc est un événement · Le gris est une matière
               </p>
               <h2 className="font-display text-2xl font-bold text-[#FAF8F5] sm:text-3xl text-balance">
-                Scène de validation commune : trois traitements au fusain
+                Illustrations de référence : trois traitements au fusain
               </h2>
             </div>
             <button
               type="button"
               onClick={() => setActiveTab('phase_c')}
-              className="flex min-h-[44px] items-center justify-center gap-2 bg-[#FAF8F5] px-5 py-2.5 text-sm font-semibold text-[#0B0B0B] transition-colors hover:bg-[#DFDBD2] whitespace-nowrap shrink-0"
+              className="flex min-h-[44px] shrink-0 items-center justify-center gap-2 whitespace-nowrap bg-[#FAF8F5] px-5 py-2.5 text-sm font-semibold text-[#0B0B0B] transition-colors hover:bg-[#DFDBD2]"
             >
               <Play className="h-4 w-4" aria-hidden="true" />
-              <span>Lancer le test d’intégration (Phase C)</span>
+              <span>Ouvrir les expérimentations Puits</span>
             </button>
           </section>
 
-          {/* Phase A: Three Variations Grid */}
           <section aria-label="Phase A : trois variations" className="grid gap-6 lg:grid-cols-3">
             {VARIATIONS.map((item) => {
               const isSelected = variation === item.id;
@@ -1352,12 +981,13 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
                       type="button"
                       onClick={() => {
                         setVariation(item.id);
+                        setExperiment('initial');
                         setActiveTab('phase_c');
                       }}
                       className="flex min-h-[42px] w-full items-center justify-center gap-2 border border-[#3A3A3A] bg-[#181818] px-4 py-2 text-xs font-semibold text-[#FAF8F5] transition-colors hover:bg-[#FAF8F5] hover:text-[#0B0B0B]"
                     >
                       <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span>Tester ce rendu dans Phase C</span>
+                      <span>Comparer avec cette variante</span>
                     </button>
                   </div>
                 </article>
@@ -1365,7 +995,6 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
             })}
           </section>
 
-          {/* Phase B: Comparative Matrix */}
           <section className="space-y-4 border-t border-[#242424] pt-8">
             <div>
               <p className="font-mono-num text-xs text-[#9C978E]">Phase B · Sélection</p>
@@ -1403,80 +1032,223 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
             </div>
           </section>
         </main>
-      ) : (
-        /* Phase C: Playable Animated Integration Test */
-        <main className="mx-auto grid max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-12">
-          {/* Canvas Viewport */}
-          <section className="space-y-3 lg:col-span-8">
-            <div className="flex flex-wrap items-center justify-between gap-3 border border-[#242424] bg-[#121212] px-4 py-2.5">
-              <div className="flex flex-wrap items-center gap-4 font-mono-num text-xs">
-                <span className="text-[#FAF8F5]">
-                  PV : <strong className="tabular-nums">6/6</strong>
-                </span>
-                <span className="text-[#D8A55C]">
-                  Huile : <strong className="tabular-nums">{scene.oil.toFixed(1)}</strong>
-                </span>
-                <span className="text-[#D0CCC4]">
-                  Pièces : <strong className="tabular-nums">{scene.coins}</strong>
-                </span>
-                <span className={inInn ? 'text-[#D8A55C]' : heroDistance <= 4 ? 'text-[#D1665E]' : 'text-[#9C978E]'}>
-                  {inInn
-                    ? 'Statut : En sûreté (Auberge)'
-                    : heroDistance <= 4
-                    ? `Héros proche (${heroDistance} cases)`
-                    : `Héros à ${heroDistance} cases`}
-                </span>
-              </div>
+      )}
 
-              {/* Live shader switcher */}
-              <div className="flex items-center gap-1" role="group" aria-label="Variante de rendu">
-                {VARIATIONS.map((v) => (
+      {activeTab === 'phase_c' && (
+        <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-12">
+          <section className="space-y-3 lg:col-span-8">
+            {/* Top Status & Experiment Selector Toolbar */}
+            <div className="space-y-2 border border-[#242424] bg-[#121212] px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-4 font-mono-num text-xs">
+                  <span className="text-[#FAF8F5]">
+                    PV : <strong className="tabular-nums">6/6</strong>
+                  </span>
+                  <span className="text-[#D8A55C]">
+                    Huile : <strong className="tabular-nums">{scene.oil.toFixed(1)}</strong>
+                  </span>
+                  <span className="text-[#D0CCC4]">
+                    Pièces : <strong className="tabular-nums">{scene.coins}</strong>
+                  </span>
+                  <span
+                    className={
+                      inInn
+                        ? 'text-[#D8A55C]'
+                        : heroDistance <= 4
+                        ? 'text-[#D1665E]'
+                        : 'text-[#9C978E]'
+                    }
+                  >
+                    {inInn
+                      ? 'Auberge (sûr)'
+                      : heroDistance <= 4
+                      ? `Héros proche (${heroDistance} cases)`
+                      : `Héros à ${heroDistance} cases`}
+                  </span>
+                </div>
+
+                {/* Modes: Parallax ON/OFF, 2x2 Compare, Freeze Static Frame */}
+                <div className="flex flex-wrap items-center gap-1.5">
                   <button
-                    key={v.id}
                     type="button"
-                    onClick={() => setVariation(v.id)}
-                    className={`min-h-[32px] px-2.5 py-1 text-xs transition-colors whitespace-nowrap shrink-0 ${
-                      variation === v.id
-                        ? 'bg-[#FAF8F5] font-semibold text-[#0B0B0B]'
-                        : 'border border-[#2E2E2E] bg-[#181818] text-[#B8B2A8] hover:text-[#FAF8F5]'
+                    onClick={() => setParallaxEnabled((prev) => !prev)}
+                    disabled={!compareGridMode && experiment === 'exp_a'}
+                    title={
+                      !compareGridMode && experiment === 'exp_a'
+                        ? 'L’Expérience A impose zéro parallaxe'
+                        : 'Basculer la parallaxe (P)'
+                    }
+                    className={`flex min-h-[32px] items-center gap-1.5 border px-2.5 py-1 text-xs transition-colors ${
+                      !compareGridMode && experiment === 'exp_a'
+                        ? 'cursor-not-allowed border-[#242424] bg-[#121212] text-[#5C5852]'
+                        : parallaxEnabled
+                        ? 'border-[#D8A55C] bg-[#221D15] text-[#FAF8F5]'
+                        : 'border-[#2E2E2E] bg-[#181818] text-[#B8B2A8] hover:text-[#FAF8F5]'
                     }`}
                   >
-                    {v.id === 'contraste'
-                      ? 'Contraste'
-                      : v.id === 'gestuel'
-                      ? 'Gestuel'
-                      : 'Atmosphère'}
+                    <Layers className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>
+                      Parallaxe :{' '}
+                      {!compareGridMode && experiment === 'exp_a'
+                        ? 'Verrouillée OFF'
+                        : parallaxEnabled
+                        ? 'ON'
+                        : 'OFF'}
+                    </span>
                   </button>
-                ))}
+
+                  <button
+                    type="button"
+                    onClick={() => setFrozenFrame((prev) => !prev)}
+                    className={`flex min-h-[32px] items-center gap-1.5 border px-2.5 py-1 text-xs transition-colors ${
+                      frozenFrame
+                        ? 'border-[#FAF8F5] bg-[#FAF8F5] font-semibold text-[#0B0B0B]'
+                        : 'border-[#2E2E2E] bg-[#181818] text-[#B8B2A8] hover:text-[#FAF8F5]'
+                    }`}
+                  >
+                    <Pause className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>{frozenFrame ? 'Image figée (F)' : 'Figer (F)'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCompareGridMode((prev) => !prev)}
+                    className={`flex min-h-[32px] items-center gap-1.5 border px-2.5 py-1 text-xs transition-colors ${
+                      compareGridMode
+                        ? 'border-[#FAF8F5] bg-[#FAF8F5] font-semibold text-[#0B0B0B]'
+                        : 'border-[#2E2E2E] bg-[#181818] text-[#B8B2A8] hover:text-[#FAF8F5]'
+                    }`}
+                  >
+                    <Columns2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Comparatif 2×2 (K)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 4-Way Pit Representation Selector */}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#202020] pt-2.5">
+                <div
+                  className="flex flex-wrap items-center gap-1"
+                  role="group"
+                  aria-label="Expérimentation du Grand Puits"
+                >
+                  {EXPERIMENTS.map((exp) => {
+                    const active = !compareGridMode && experiment === exp.id;
+                    return (
+                      <button
+                        key={exp.id}
+                        type="button"
+                        onClick={() => {
+                          setCompareGridMode(false);
+                          setExperiment(exp.id);
+                        }}
+                        className={`min-h-[32px] shrink-0 whitespace-nowrap px-2.5 py-1 text-xs transition-colors ${
+                          active
+                            ? 'bg-[#FAF8F5] font-semibold text-[#0B0B0B]'
+                            : 'border border-[#2E2E2E] bg-[#181818] text-[#B8B2A8] hover:text-[#FAF8F5]'
+                        }`}
+                      >
+                        <span className="font-mono-num mr-1.5 opacity-60">{exp.keyHint}.</span>
+                        {exp.shortLabel}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {(compareGridMode || experiment === 'initial') && (
+                  <div className="flex items-center gap-1" role="group" aria-label="Variante Bayer initiale">
+                    {VARIATIONS.map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => setVariation(v.id)}
+                        className={`min-h-[30px] shrink-0 whitespace-nowrap px-2 py-0.5 text-[11px] transition-colors ${
+                          variation === v.id
+                            ? 'border border-[#FAF8F5] bg-[#242424] text-[#FAF8F5]'
+                            : 'border border-[#282828] bg-[#141414] text-[#8E8980] hover:text-[#FAF8F5]'
+                        }`}
+                      >
+                        {v.id === 'contraste'
+                          ? 'Contraste'
+                          : v.id === 'gestuel'
+                          ? 'Gestuel'
+                          : 'Atmosphère'}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="overflow-hidden border border-[#262626] bg-[#050505]">
-              <canvas
-                ref={canvasRef}
-                aria-label="Scène animée Phase C — Fusain Abyssal"
-                className="block aspect-[14/9] w-full"
-              />
-            </div>
+            {/* Viewport: either single active experiment OR synchronized 2x2 static/live comparison */}
+            {compareGridMode ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {EXPERIMENTS.map((exp) => (
+                  <div key={exp.id} className="border border-[#2B2B2B] bg-[#080808]">
+                    <div className="flex items-center justify-between border-b border-[#202020] bg-[#121212] px-3 py-1.5 text-xs">
+                      <span className="font-semibold text-[#FAF8F5]">
+                        <span className="font-mono-num mr-1.5 text-[#9C978E]">{exp.keyHint}.</span>
+                        {exp.shortLabel}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExperiment(exp.id);
+                          setCompareGridMode(false);
+                        }}
+                        className="text-[11px] text-[#B8B2A8] underline-offset-2 hover:text-[#FAF8F5] hover:underline"
+                      >
+                        Plein cadre
+                      </button>
+                    </div>
+                    <canvas
+                      ref={(el) => {
+                        compareCanvasRefs.current[exp.id] = el;
+                      }}
+                      aria-label={exp.title}
+                      className="block aspect-[14/9] w-full bg-[#040404]"
+                    />
+                    <p className="border-t border-[#1D1D1D] px-3 py-2 text-[11px] leading-snug text-[#A8A298]">
+                      {exp.hypothesis}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="overflow-hidden border border-[#262626] bg-[#050505]">
+                <canvas
+                  ref={canvasRef}
+                  aria-label={`${activeExperimentSpec.title} — scène jouable`}
+                  className="block aspect-[14/9] w-full"
+                />
+              </div>
+            )}
 
-            {/* Active Observation Bar (sober, zero ornament) */}
+            {/* Active Observation & Architectural Hypothesis Bar */}
             <div className="border border-[#262626] bg-[#121212] px-4 py-3">
-              <div className="flex items-center justify-between gap-2 text-xs text-[#9C978E]">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#9C978E]">
                 <span className="font-mono-num uppercase tracking-wide text-[#FAF8F5]">
                   {scene.speaker}
                 </span>
-                <span className="font-mono-num">Tour {scene.turn} · Mode {activeSpec.title}</span>
+                <span className="font-mono-num">
+                  Tour {scene.turn} ·{' '}
+                  {compareGridMode
+                    ? `Comparatif 2×2 · Parallaxe ${parallaxEnabled ? 'ON (sauf Exp. A)' : 'OFF'}`
+                    : `${activeExperimentSpec.shortLabel} · Parallaxe ${
+                        effectiveParallax ? 'ON' : 'OFF'
+                      }`}
+                </span>
               </div>
               <p className="mt-1.5 text-sm leading-relaxed text-[#E4E0D8]">{scene.message}</p>
             </div>
           </section>
 
-          {/* Controls & Checklist Rail */}
+          {/* Controls & Experiment Technical Notes Rail */}
           <aside className="space-y-5 lg:col-span-4">
             <div className="space-y-4 border border-[#262626] bg-[#121212] p-5">
               <div className="flex items-center justify-between border-b border-[#242424] pb-3">
                 <h2 className="font-display text-lg font-bold text-[#FAF8F5]">
-                  Banc d’essai animé
+                  Banc d’essai du Puits
                 </h2>
                 <SlidersHorizontal className="h-4 w-4 text-[#9C978E]" aria-hidden="true" />
               </div>
@@ -1544,30 +1316,198 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
               </div>
             </div>
 
+            {/* Technical note for the currently selected Pit experiment */}
             <div className="space-y-3 border border-[#262626] bg-[#121212] p-5 text-xs leading-relaxed text-[#B8B2A8]">
               <div className="flex items-center gap-2 font-semibold text-[#FAF8F5]">
                 <Compass className="h-4 w-4" aria-hidden="true" />
-                <span>Points à vérifier dans ce test</span>
+                <span>{activeExperimentSpec.title}</span>
               </div>
-              <ul className="space-y-2">
-                <li>
-                  <strong className="text-[#FAF8F5]">1. Gobelin &amp; lanterne :</strong> démarche sautillante, oscillation des oreilles/sacoche et inertie physique de la lanterne.
-                </li>
-                <li>
-                  <strong className="text-[#FAF8F5]">2. Coffre (haut de passerelle) :</strong> premier essai bloqué avec tremblement et étincelles de craie, second essai ouvrant le couvercle.
-                </li>
-                <li>
-                  <strong className="text-[#FAF8F5]">3. Rat percepteur (en bas) :</strong> sursaute et lève son registre, puis panique quand le Héros approche.
-                </li>
-                <li>
-                  <strong className="text-[#FAF8F5]">4. Rupture du Héros :</strong> blanc pur tranchant contrastant avec l’estompe et la sécurité tiède de l’auberge à gauche.
-                </li>
-              </ul>
+              <dl className="space-y-2.5">
+                <div>
+                  <dt className="font-medium text-[#FAF8F5]">Intention spatiale</dt>
+                  <dd className="mt-0.5">{activeExperimentSpec.hypothesis}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-[#FAF8F5]">Procédé de rendu</dt>
+                  <dd className="mt-0.5">{activeExperimentSpec.mechanism}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-[#FAF8F5]">Règle de parallaxe</dt>
+                  <dd className="mt-0.5">{activeExperimentSpec.parallaxRule}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-[#D8A55C]">Limite observée</dt>
+                  <dd className="mt-0.5 text-[#D0CCC4]">{activeExperimentSpec.limitNote}</dd>
+                </div>
+              </dl>
               <p className="border-t border-[#222222] pt-3 font-mono-num text-[11px] text-[#8E8980]">
-                Clavier : Flèches / WASD · Espace / Entrée (Action) · V (Variante) · H (Héros) · Tab (Phases A/B)
+                Clavier : Flèches/WASD · Espace (Action) · 1–4 (Pistes) · P (Parallaxe) · K
+                (Comparatif 2×2) · F (Figer) · H (Héros) · Tab (Onglets)
               </p>
             </div>
           </aside>
+        </main>
+      )}
+
+      {activeTab === 'audit' && (
+        <main className="mx-auto max-w-6xl space-y-10 px-4 py-8 sm:px-6">
+          {/* Step 1: Audit of Current Codebase */}
+          <section className="space-y-4">
+            <div className="border-b border-[#242424] pb-4">
+              <p className="font-mono-num text-xs text-[#9C978E]">
+                Étape 1 · Audit graphique &amp; architectural (moteur principal inchangé)
+              </p>
+              <h2 className="font-display mt-1 text-2xl font-bold text-[#FAF8F5]">
+                Pourquoi le Grand Puits reste plat dans le rendu jouable actuel
+              </h2>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <article className="space-y-2 border border-[#262626] bg-[#121212] p-5 text-sm">
+                <h3 className="font-semibold text-[#FAF8F5]">
+                  1. Contradiction plan / perspective
+                </h3>
+                <p className="leading-relaxed text-[#C9C4BC]">
+                  Dans <code className="font-mono-num text-xs">FusainStudioView</code> (336×216), le
+                  plateau est rigoureusement zénithal tandis que le puits empile 4 rectangles de
+                  parallaxe parallèles au sol. Sans épaisseur de rebord ni paroi plongeante,
+                  l’abîme ressemble à un motif animé derrière une fenêtre plane.
+                </p>
+              </article>
+
+              <article className="space-y-2 border border-[#262626] bg-[#121212] p-5 text-sm">
+                <h3 className="font-semibold text-[#FAF8F5]">
+                  2. Fragmentation case par case
+                </h3>
+                <p className="leading-relaxed text-[#C9C4BC]">
+                  Dans <code className="font-mono-num text-xs">DungeonCanvas.tsx</code>,{' '}
+                  <code className="font-mono-num text-xs">drawPitTile()</code> dessine chaque case
+                  de vide indépendamment avec son propre cadre intérieur et ses diagonales locales.
+                  Le gouffre se brise visuellement en un damier répétitif au lieu d’un volume
+                  monumental continu.
+                </p>
+              </article>
+
+              <article className="space-y-2 border border-[#262626] bg-[#121212] p-5 text-sm">
+                <h3 className="font-semibold text-[#FAF8F5]">
+                  3. Absence d’occlusion &amp; d’ancrage
+                </h3>
+                <p className="leading-relaxed text-[#C9C4BC]">
+                  Les chaînes et la roue flottent sans point d’attache sur la margelle, et
+                  l’éperon du coffre comme la passerelle manquent d’ombres portées et de pilotis
+                  ancrés sur la falaise. Dans <code className="font-mono-num text-xs">worldGen.ts</code>,
+                  <code className="font-mono-num text-xs">PitLandmark</code> est purement textuel
+                  et ne porte aucune coordonnée persistante d’un étage à l’autre.
+                </p>
+              </article>
+            </div>
+          </section>
+
+          {/* Step 3: 7-Criterion Comparative Matrix */}
+          <section className="space-y-4">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="font-mono-num text-xs text-[#9C978E]">
+                  Étape 3 · Grille d’évaluation critique
+                </p>
+                <h2 className="font-display text-2xl font-bold text-[#FAF8F5]">
+                  Comparatif sur les 7 critères (image fixe &amp; en mouvement)
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCompareGridMode(true);
+                  setFrozenFrame(true);
+                  setActiveTab('phase_c');
+                }}
+                className="flex min-h-[40px] items-center gap-2 bg-[#FAF8F5] px-4 py-2 text-xs font-semibold text-[#0B0B0B] hover:bg-[#DFDBD2]"
+              >
+                <Columns2 className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Inspecter les 4 captures fixes (2×2)</span>
+              </button>
+            </div>
+
+            <div className="overflow-x-auto border border-[#262626] bg-[#111111]">
+              <table className="w-full min-w-[820px] border-collapse text-left text-xs leading-relaxed">
+                <thead>
+                  <tr className="border-b border-[#262626] bg-[#161616] text-[#A39E95]">
+                    <th className="px-4 py-3 font-medium">Critère</th>
+                    <th className="px-4 py-3 font-medium">Initial (Bayer)</th>
+                    <th className="px-4 py-3 font-medium">Exp. A · Paroi &amp; occlusion</th>
+                    <th className="px-4 py-3 font-medium">Exp. B · Projection 3D</th>
+                    <th className="px-4 py-3 font-medium">Exp. C · Hybride 65°</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#222222] text-[#D0CCC4]">
+                  {EVALUATION_MATRIX.map((row) => (
+                    <tr key={row.criterion} className="align-top">
+                      <td className="px-4 py-3.5 font-semibold text-[#FAF8F5]">{row.criterion}</td>
+                      <td className="px-4 py-3.5">{row.initial}</td>
+                      <td className="px-4 py-3.5">{row.expA}</td>
+                      <td className="px-4 py-3.5">{row.expB}</td>
+                      <td className="px-4 py-3.5">{row.expC}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* Steps 4 & 5: Recommendation & Migration Roadmap */}
+          <section className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-3 border border-[#262626] bg-[#121212] p-6">
+              <p className="font-mono-num text-xs text-[#D8A55C]">
+                Étape 4 · Recommandation artistique &amp; technique
+              </p>
+              <h3 className="font-display text-xl font-bold text-[#FAF8F5]">
+                Synthèse : socle Exp. A + coupe hybride Exp. C + ancrage Exp. B
+              </h3>
+              <p className="text-sm leading-relaxed text-[#D0CCC4]">
+                Aucun dispositif isolé ne suffit : la vraie solution combine l’<strong>épaisseur de
+                rebord et l’occlusion franche d’Exp. A</strong> (lisibles à 0 parallaxe), les{' '}
+                <strong>contrastes d’échelle monumentaux d’Exp. C</strong> (arches, cage ×3,
+                auberge minuscule en contrebas) et le <strong>fil conducteur géométrique
+                d’Exp. B</strong> (câbles ancrés au treuil du niveau 0 traversant les étages).
+              </p>
+              <p className="text-sm leading-relaxed text-[#B8B2A8]">
+                Côté matière, le rendu hybride <strong>672×432</strong> (sprites pixel-art animés
+                nets à 2× sur un décor tracé au fusain gestuel et éclairé par estompe soustractive)
+                supprime l’aspect damier du dithering Bayer systématique sans alourdir la production.
+              </p>
+            </div>
+
+            <div className="space-y-3 border border-[#262626] bg-[#121212] p-6">
+              <p className="font-mono-num text-xs text-[#9C978E]">
+                Étape 5 · Plan d’intégration ultérieure (après validation)
+              </p>
+              <h3 className="font-display text-xl font-bold text-[#FAF8F5]">
+                Étapes ordonnées vers le moteur principal
+              </h3>
+              <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-[#D0CCC4]">
+                <li>
+                  Enrichir <code className="font-mono-num text-xs">PitLandmark</code> dans{' '}
+                  <code className="font-mono-num text-xs">worldGen.ts</code> avec des coordonnées
+                  normalisées persistantes (<code className="font-mono-num text-xs">xNorm, yNorm, span</code>)
+                  pour projeter les infrastructures sur 3 à 4 étages d’écart.
+                </li>
+                <li>
+                  Remplacer l’appel case par case à{' '}
+                  <code className="font-mono-num text-xs">drawPitTile()</code> dans{' '}
+                  <code className="font-mono-num text-xs">DungeonCanvas.tsx</code> par une passe
+                  unifiée calculant le rectangle englobant du puits avant le tracé des passerelles.
+                </li>
+                <li>
+                  Dessiner systématiquement le rebord rocheux biseauté, l’ombre portée sous les
+                  balcons/passerelles et les câbles ancrés dans une passe d’occlusion Z-triée.
+                </li>
+                <li>
+                  Calibrer la parallaxe en option subtile (≤ 2 px) jamais nécessaire à la lecture
+                  statique de la profondeur.
+                </li>
+              </ol>
+            </div>
+          </section>
         </main>
       )}
 
@@ -1612,13 +1552,14 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
                 type="button"
                 onClick={() => {
                   setVariation(lightboxSpec.id);
+                  setExperiment('initial');
                   setLightboxId(null);
                   setActiveTab('phase_c');
                 }}
                 className="flex min-h-[38px] items-center gap-2 bg-[#FAF8F5] px-4 py-1.5 font-semibold text-[#0B0B0B] hover:bg-[#E0DCD3]"
               >
                 <Flame className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Charger dans Phase C</span>
+                <span>Comparer dans le banc d’essai</span>
               </button>
             </div>
           </div>

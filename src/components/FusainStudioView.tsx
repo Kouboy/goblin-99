@@ -147,8 +147,21 @@ const EXPERIMENTS: ExperimentSpec[] = [
     limitNote: 'Les anneaux concentriques risquent une lecture « cage d’ascenseur » géométrique si le fusain reste trop régulier.',
   },
   {
-    id: 'exp_c',
+    id: 'exp_b2',
     keyHint: '4',
+    shortLabel: 'Exp. B2 · Gestuel dense',
+    title: 'Exp. B2 — Gestuel dense (charpente Exp. B + matière fusain)',
+    hypothesis:
+      'Conserver la charpente spatiale unifiée de l’Exp. B tout en réinjectant le grain, les hachures, la lèvre physique du bord, l’occlusion et une parallaxe hiérarchisée sur 4 strates.',
+    mechanism:
+      'Point de fuite vertical unifié, 4 plans à parallaxe calibrée (proche/moyen/lointain/abyssal), traits de fusain brisés, hachures directionnelles, roche en surplomb, niche occultée, rebord épais et 4 micro-événements lointains.',
+    parallaxRule: 'Parallaxe hiérarchisée sur 4 niveaux (activable/coupable via P).',
+    limitNote:
+      'Demande de doser l’épaisseur des hachures au sol pour préserver la lecture immédiate des cases autour du coffre et de la passerelle.',
+  },
+  {
+    id: 'exp_c',
+    keyHint: '5',
     shortLabel: 'Exp. C · Hybride',
     title: 'Expérience C — Représentation hybride (coupe oblique ~65°)',
     hypothesis: 'Garder une grille jouable en vue de dessus pendant que l’ouverture bascule en coupe verticale.',
@@ -164,6 +177,7 @@ interface EvaluationRow {
   initial: string;
   expA: string;
   expB: string;
+  expB2: string;
   expC: string;
 }
 
@@ -173,6 +187,7 @@ const EVALUATION_MATRIX: EvaluationRow[] = [
     initial: 'Faible : les strates se superposent sans bord vertical épais ni fuite vers le bas.',
     expA: 'Bonne : on perçoit immédiatement une falaise sous la corniche et des pilotis ancrés dans la roche.',
     expB: 'Forte : la convergence vers le point de fuite inférieur aspire le regard vers les strates profondes.',
+    expB2: 'Très forte : les 4 strates hachurées, l’ombre sous la margelle et le puits noir central creusent l’abîme même figé.',
     expC: 'Très forte : le contraste d’échelle (cage ×3, auberge minuscule au -2) crée un choc vertical immédiat.',
   },
   {
@@ -180,6 +195,7 @@ const EVALUATION_MATRIX: EvaluationRow[] = [
     initial: 'Correcte mais bruitée par le tramage Bayer sur le grain du sol.',
     expA: 'Exemplaire : rebords nets à la craie, séparation franche entre sol praticable et paroi plongeante.',
     expB: 'Très bonne : le treuil reste ancré hors grille jouable sans gêner le passage de la passerelle.',
+    expB2: 'Très bonne : lèvre épaisse à la craie et poteaux de garde-corps soulignent physiquement la frontière du vide.',
     expC: 'Très bonne : les cases et sprites 48×48 restent strictement orthogonaux malgré l’ouverture oblique.',
   },
   {
@@ -187,6 +203,7 @@ const EVALUATION_MATRIX: EvaluationRow[] = [
     initial: 'Modéré : la roue lointaine paraît juste plate, sans objet intermédiaire calibré.',
     expA: 'Moyen : la poutre et la chaîne donnent de l’épaisseur, mais l’échelle monumentale reste timide.',
     expB: 'Bon : la décroissance progressive des trois plateformes mesure objectivement l’éloignement.',
+    expB2: 'Très bon : cage intermédiaire, passerelle occultée, arche cyclopéenne et nacelle minuscule étagent l’échelle.',
     expC: 'Optimal : la cage cyclopéenne et la petite fenêtre d’auberge en contrebas écrasent littéralement le gobelin.',
   },
   {
@@ -194,6 +211,7 @@ const EVALUATION_MATRIX: EvaluationRow[] = [
     initial: 'Moyenne : la trame Bayer systématique donne un aspect rétro numérique plutôt que frotté.',
     expA: 'Forte : noirs profonds, traits gestuels brisés et poudre de craie sur les arêtes de fracture.',
     expB: 'Correcte : la perspective 3D introduit des lignes géométriques qu’il faut casser manuellement au trait.',
+    expB2: 'Optimale : doubles traits de fusain interrompus, hachures directionnelles, noirs d’estompe et blancs rares.',
     expC: 'Excellente : grandes masses noires, estompe soustractive autour de la lanterne, blanc réservé aux repères.',
   },
   {
@@ -201,6 +219,7 @@ const EVALUATION_MATRIX: EvaluationRow[] = [
     initial: 'Fragile : la parallaxe à 4 vitesses attire l’œil sur le glissement du décor plutôt que le vertige.',
     expA: 'Parfaite : zéro parallaxe, aucun décalage parasite entre la passerelle et le fond.',
     expB: 'Très stable : le décalage borné suit une géométrie projetée cohérente sans cisaillement.',
+    expB2: 'Maîtrisée : parallaxe hiérarchisée (proche sensible → fond quasi immobile) sans faire flotter les plans.',
     expC: 'Bonne si le déplacement oblique reste subtil (≤ 2 px) et désactivable.',
   },
   {
@@ -208,6 +227,7 @@ const EVALUATION_MATRIX: EvaluationRow[] = [
     initial: 'Limitée : les repères de worldGen.ts restent purement textuels et non positionnés dans le vide.',
     expA: 'Immédiate : s’applique à n’importe quel contour de puits généré (balcon, fenêtre, corniche).',
     expB: 'Exige un axe central de puits partagé entre étages et des coordonnées normalisées dans PitLandmark.',
+    expB2: 'Élevée : même socle paramétrique que Exp. B, complété par des modules de bord et d’occlusion génériques.',
     expC: 'Bien adaptée dès lors que la zone de coupe dispose d’un rect de vide minimal (≥ 4 cases de large).',
   },
   {
@@ -215,6 +235,7 @@ const EVALUATION_MATRIX: EvaluationRow[] = [
     initial: 'Déjà proche de l’existant, mais perpétue le découpage case par case dans drawPitTile().',
     expA: 'Faible : remplace simplement drawPitTile() par une passe unifiée du contour de gouffre.',
     expB: 'Moyenne : requiert un calcul de boîte englobante du puits et une projection par profondeur Z.',
+    expB2: 'Moyenne : boîte englobante du puits + primitives gestuelles légères réutilisables sur tout le donjon.',
     expC: 'Moyenne : passe unique de rendu du puits avant les passerelles, avec table de repères multi-étages.',
   },
 ];
@@ -242,15 +263,15 @@ function createInitialPhaseC(): PhaseCState {
     oil: 8,
     speaker: 'Observation',
     message:
-      'Vous quittez le seuil de l’auberge vers la passerelle du Grand Puits. Basculez entre les 4 représentations (1–4) ou activez le comparatif 2×2 (K).',
+      'Vous quittez le seuil de l’auberge vers la passerelle du Grand Puits. Basculez entre les 5 rendus (1–5) ou ouvrez le comparatif complet (K).',
   };
 }
 
 export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) => {
   const [activeTab, setActiveTab] = useState<'explore' | 'phase_c' | 'audit'>('phase_c');
   const [variation, setVariation] = useState<FusainVariationId>('gestuel');
-  const [experiment, setExperiment] = useState<PitExperimentId>('exp_c');
-  const [parallaxEnabled, setParallaxEnabled] = useState<boolean>(false);
+  const [experiment, setExperiment] = useState<PitExperimentId>('exp_b2');
+  const [parallaxEnabled, setParallaxEnabled] = useState<boolean>(true);
   const [compareGridMode, setCompareGridMode] = useState<boolean>(false);
   const [frozenFrame, setFrozenFrame] = useState<boolean>(false);
   const [lightboxId, setLightboxId] = useState<FusainVariationId | null>(null);
@@ -261,6 +282,7 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
     initial: null,
     exp_a: null,
     exp_b: null,
+    exp_b2: null,
     exp_c: null,
   });
   const bufInitialRef = useRef<HTMLCanvasElement | null>(null);
@@ -650,6 +672,9 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
         setExperiment('exp_b');
       } else if (key === '4') {
         e.preventDefault();
+        setExperiment('exp_b2');
+      } else if (key === '5') {
+        e.preventDefault();
         setExperiment('exp_c');
       } else if (key === 'p') {
         e.preventDefault();
@@ -808,7 +833,7 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
       const mode = variationRef.current;
 
       if (compareGridRef.current) {
-        (['initial', 'exp_a', 'exp_b', 'exp_c'] as PitExperimentId[]).forEach((expId) => {
+        (['initial', 'exp_a', 'exp_b', 'exp_b2', 'exp_c'] as PitExperimentId[]).forEach((expId) => {
           const targetCanvas = compareCanvasRefs.current[expId];
           if (!targetCanvas) return;
           renderPhaseCFrame(
@@ -1120,12 +1145,12 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
                     }`}
                   >
                     <Columns2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>Comparatif 2×2 (K)</span>
+                    <span>Comparatif grille (K)</span>
                   </button>
                 </div>
               </div>
 
-              {/* 4-Way Pit Representation Selector */}
+              {/* 5-Way Pit Representation Selector */}
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#202020] pt-2.5">
                 <div
                   className="flex flex-wrap items-center gap-1"
@@ -1180,11 +1205,16 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
               </div>
             </div>
 
-            {/* Viewport: either single active experiment OR synchronized 2x2 static/live comparison */}
+            {/* Viewport: single active experiment OR synchronized 6-panel comparison (Initial, A, B, B2, C + Phase A Gestuel) */}
             {compareGridMode ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 {EXPERIMENTS.map((exp) => (
-                  <div key={exp.id} className="border border-[#2B2B2B] bg-[#080808]">
+                  <div
+                    key={exp.id}
+                    className={`border bg-[#080808] ${
+                      exp.id === 'exp_b2' ? 'border-[#FAF8F5]' : 'border-[#2B2B2B]'
+                    }`}
+                  >
                     <div className="flex items-center justify-between border-b border-[#202020] bg-[#121212] px-3 py-1.5 text-xs">
                       <span className="font-semibold text-[#FAF8F5]">
                         <span className="font-mono-num mr-1.5 text-[#9C978E]">{exp.keyHint}.</span>
@@ -1213,6 +1243,32 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
                     </p>
                   </div>
                 ))}
+
+                {/* 6th comparison card: Phase A Gestuel reference illustration for direct texture benchmark */}
+                <div className="border border-[#2B2B2B] bg-[#080808]">
+                  <div className="flex items-center justify-between border-b border-[#202020] bg-[#121212] px-3 py-1.5 text-xs">
+                    <span className="font-semibold text-[#FAF8F5]">
+                      Réf. Phase A · Dessin gestuel
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setLightboxId('gestuel')}
+                      className="text-[11px] text-[#B8B2A8] underline-offset-2 hover:text-[#FAF8F5] hover:underline"
+                    >
+                      Agrandir
+                    </button>
+                  </div>
+                  <img
+                    src={imgGestuel}
+                    alt="Référence Phase A — Dessin gestuel expressif"
+                    referrerPolicy="no-referrer"
+                    className="block aspect-[14/9] w-full bg-[#040404] object-cover"
+                  />
+                  <p className="border-t border-[#1D1D1D] px-3 py-2 text-[11px] leading-snug text-[#A8A298]">
+                    Étalon de matière : hachures vives, traits brisés, noirs charbonneux et blanc
+                    réservé aux points focaux.
+                  </p>
+                </div>
               </div>
             ) : (
               <div className="overflow-hidden border border-[#262626] bg-[#050505]">
@@ -1233,7 +1289,9 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
                 <span className="font-mono-num">
                   Tour {scene.turn} ·{' '}
                   {compareGridMode
-                    ? `Comparatif 2×2 · Parallaxe ${parallaxEnabled ? 'ON (sauf Exp. A)' : 'OFF'}`
+                    ? `Comparatif 5 pistes + Réf. Gestuel · Parallaxe ${
+                        parallaxEnabled ? 'ON (sauf Exp. A)' : 'OFF'
+                      }`
                     : `${activeExperimentSpec.shortLabel} · Parallaxe ${
                         effectiveParallax ? 'ON' : 'OFF'
                       }`}
@@ -1341,8 +1399,8 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
                 </div>
               </dl>
               <p className="border-t border-[#222222] pt-3 font-mono-num text-[11px] text-[#8E8980]">
-                Clavier : Flèches/WASD · Espace (Action) · 1–4 (Pistes) · P (Parallaxe) · K
-                (Comparatif 2×2) · F (Figer) · H (Héros) · Tab (Onglets)
+                Clavier : Flèches/WASD · Espace (Action) · 1–5 (Pistes) · P (Parallaxe) · K
+                (Comparatif) · F (Figer) · H (Héros) · Tab (Onglets)
               </p>
             </div>
           </aside>
@@ -1424,18 +1482,19 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
                 className="flex min-h-[40px] items-center gap-2 bg-[#FAF8F5] px-4 py-2 text-xs font-semibold text-[#0B0B0B] hover:bg-[#DFDBD2]"
               >
                 <Columns2 className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Inspecter les 4 captures fixes (2×2)</span>
+                <span>Inspecter les captures fixes (grille)</span>
               </button>
             </div>
 
             <div className="overflow-x-auto border border-[#262626] bg-[#111111]">
-              <table className="w-full min-w-[820px] border-collapse text-left text-xs leading-relaxed">
+              <table className="w-full min-w-[980px] border-collapse text-left text-xs leading-relaxed">
                 <thead>
                   <tr className="border-b border-[#262626] bg-[#161616] text-[#A39E95]">
                     <th className="px-4 py-3 font-medium">Critère</th>
                     <th className="px-4 py-3 font-medium">Initial (Bayer)</th>
                     <th className="px-4 py-3 font-medium">Exp. A · Paroi &amp; occlusion</th>
-                    <th className="px-4 py-3 font-medium">Exp. B · Projection 3D</th>
+                    <th className="px-4 py-3 font-medium">Exp. B · 3D unifiée</th>
+                    <th className="px-4 py-3 font-medium text-[#FAF8F5]">Exp. B2 · Gestuel dense</th>
                     <th className="px-4 py-3 font-medium">Exp. C · Hybride 65°</th>
                   </tr>
                 </thead>
@@ -1446,6 +1505,7 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
                       <td className="px-4 py-3.5">{row.initial}</td>
                       <td className="px-4 py-3.5">{row.expA}</td>
                       <td className="px-4 py-3.5">{row.expB}</td>
+                      <td className="px-4 py-3.5 bg-[#171614] text-[#FAF8F5]">{row.expB2}</td>
                       <td className="px-4 py-3.5">{row.expC}</td>
                     </tr>
                   ))}
@@ -1461,19 +1521,18 @@ export const FusainStudioView: React.FC<FusainStudioViewProps> = ({ onBack }) =>
                 Étape 4 · Recommandation artistique &amp; technique
               </p>
               <h3 className="font-display text-xl font-bold text-[#FAF8F5]">
-                Synthèse : socle Exp. A + coupe hybride Exp. C + ancrage Exp. B
+                Synthèse retenue : Exp. B2 (charpente Exp. B + Gestuel dense)
               </h3>
               <p className="text-sm leading-relaxed text-[#D0CCC4]">
-                Aucun dispositif isolé ne suffit : la vraie solution combine l’<strong>épaisseur de
-                rebord et l’occlusion franche d’Exp. A</strong> (lisibles à 0 parallaxe), les{' '}
-                <strong>contrastes d’échelle monumentaux d’Exp. C</strong> (arches, cage ×3,
-                auberge minuscule en contrebas) et le <strong>fil conducteur géométrique
-                d’Exp. B</strong> (câbles ancrés au treuil du niveau 0 traversant les étages).
+                L’<strong>Exp. B2 – Gestuel dense</strong> résout le manque de matière de l’Exp. B
+                tout en gardant sa charpente verticale unifiée : lèvre rocheuse physique et garde-corps
+                au bord du vide, 4 strates de parallaxe hiérarchisées, roches en surplomb et tunnel
+                est occultés, hachures charbonneuses et 4 micro-événements lointains rares.
               </p>
               <p className="text-sm leading-relaxed text-[#B8B2A8]">
-                Côté matière, le rendu hybride <strong>672×432</strong> (sprites pixel-art animés
-                nets à 2× sur un décor tracé au fusain gestuel et éclairé par estompe soustractive)
-                supprime l’aspect damier du dithering Bayer systématique sans alourdir la production.
+                On peut y greffer ponctuellement les repères d’échelle d’Exp. C (auberge miniature
+                lointaine au -2/-3 sur certains étages) lors de l’intégration finale dans{' '}
+                <code className="font-mono-num text-xs">DungeonCanvas</code>.
               </p>
             </div>
 

@@ -1,7 +1,7 @@
 import { FusainPixelAtlas } from './fusainPixelSprites';
 
 export type FusainVariationId = 'contraste' | 'gestuel' | 'atmospherique';
-export type PitExperimentId = 'initial' | 'exp_a' | 'exp_b' | 'exp_c';
+export type PitExperimentId = 'initial' | 'exp_a' | 'exp_b' | 'exp_b2' | 'exp_c';
 
 export const SCENE_ROWS = [
   '##############',
@@ -162,6 +162,116 @@ function drawGesturalLine(
   }
   ctx.lineTo(x2, y2);
   ctx.stroke();
+}
+
+/**
+ * Double-pass dry charcoal stick stroke with micro-breaks and organic tremor.
+ */
+function drawCharcoalStroke(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  seed: number,
+  color: string,
+  width = 1.6,
+  roughness = 2.0,
+) {
+  const dist = Math.hypot(x2 - x1, y2 - y1);
+  if (dist < 1) return;
+  const steps = Math.max(3, Math.floor(dist / 10));
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (let pass = 0; pass < 2; pass++) {
+    ctx.lineWidth = pass === 0 ? width : Math.max(0.7, width * 0.52);
+    ctx.globalAlpha = pass === 0 ? 1 : 0.45;
+    ctx.beginPath();
+    let penDown = false;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const skip = pass === 1 && hash2D(seed + pass * 31, i, 7) < 0.24;
+      const jx = (hash2D(seed + pass * 17, i, 1) - 0.5) * roughness * (pass === 1 ? 1.45 : 1);
+      const jy = (hash2D(seed + pass * 29, i, 2) - 0.5) * roughness * (pass === 1 ? 1.45 : 1);
+      const px = x1 + (x2 - x1) * t + jx;
+      const py = y1 + (y2 - y1) * t + jy;
+      if (skip) {
+        penDown = false;
+      } else if (!penDown) {
+        ctx.moveTo(px, py);
+        penDown = true;
+      } else {
+        ctx.lineTo(px, py);
+      }
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * Directional hand-hatched charcoal patch to build values out of strokes instead of flat fills.
+ */
+function drawCharcoalHatchRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  seed: number,
+  spacing: number,
+  dxRatio: number,
+  color: string,
+  width = 1.1,
+) {
+  if (w <= 2 || h <= 2) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  const span = Math.abs(dxRatio) * h;
+  const count = Math.ceil((w + span) / spacing);
+  for (let i = -1; i <= count; i++) {
+    const sx = x + i * spacing + (hash2D(seed, i, 3) - 0.5) * (spacing * 0.45);
+    const sy = y - 2;
+    const ex = sx + h * dxRatio + (hash2D(seed, i, 9) - 0.5) * 4;
+    const ey = y + h + 2;
+    drawGesturalLine(ctx, sx, sy, ex, ey, seed + i * 7, color, width, 1.8);
+  }
+  ctx.restore();
+}
+
+/**
+ * Interrupted, hand-sketched polygon ring with slight corner overshoot.
+ */
+function drawBrokenPolyRing(
+  ctx: CanvasRenderingContext2D,
+  pts: Array<{ x: number; y: number }>,
+  seed: number,
+  color: string,
+  width = 1.3,
+  roughness = 1.9,
+) {
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    const over = (hash2D(seed, i, 12) - 0.3) * 3.5;
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    drawCharcoalStroke(
+      ctx,
+      a.x - Math.cos(ang) * over * 0.4,
+      a.y - Math.sin(ang) * over * 0.4,
+      b.x + Math.cos(ang) * over,
+      b.y + Math.sin(ang) * over,
+      seed + i * 19,
+      color,
+      width,
+      roughness,
+    );
+  }
 }
 
 function drawPixelCircle(
@@ -764,6 +874,462 @@ function renderHybridGesturalExperiment(
     const cableTopY = pitY;
     const cableBot = project(cableTopX, pitY + 230, 3.2);
     drawGesturalLine(ctx, cableTopX, cableTopY, cableBot.x, cableBot.y, 450, '#B5AEA2', 1.8, 1.0);
+  } else if (experiment === 'exp_b2') {
+    // -------------------------------------------------------------------------
+    // EXPÉRIENCE B2 : GESTUEL DENSE (Charpente Exp. B + matière fusain + 4 strates)
+    // Structure unifiée vers VP + parallaxe hiérarchisée + occlusion & micro-événements.
+    // -------------------------------------------------------------------------
+    ctx.fillStyle = '#020202';
+    ctx.fillRect(pitX, pitY, pitW, pitH);
+
+    // Vanishing point below shaft center
+    const vpX = pitX + pitW * 0.51;
+    const vpY = pitY + pitH + 86;
+
+    // 4-tier controlled parallax hierarchy (near -> mid -> far -> abyssal almost fixed)
+    const pFactorForZ = (z: number) => {
+      if (!effectiveParallax) return 0;
+      if (z <= 0.55) return 3.8; // Plan proche : déplacement sensible
+      if (z <= 2.1) return 2.2; // Plan intermédiaire : déplacement modéré
+      if (z <= 4.1) return 0.95; // Plan lointain : déplacement faible
+      return 0.25; // Fond abyssal : presque immobile
+    };
+
+    const projectB2 = (worldX: number, worldY: number, z: number) => {
+      const scale = 1 / (1 + z * 0.46);
+      const pf = pFactorForZ(z);
+      const px = vpX + (worldX - vpX) * scale - camDx * pf;
+      const py = vpY + (worldY - vpY) * scale - camDy * (pf * 0.82);
+      return { x: px, y: py, s: scale };
+    };
+
+    // A. FOND ABYSSAL (z > 4.4) — Dominante noire, traits rares, micro-événements lointains
+    const deepTL = projectB2(pitX, pitY, 4.6);
+    const deepTR = projectB2(pitX + pitW, pitY, 4.6);
+    const deepBR = projectB2(pitX + pitW, pitY + pitH, 4.6);
+    const deepBL = projectB2(pitX, pitY + pitH, 4.6);
+
+    // Tapered shaft wall silhouettes filled with charcoal black + directional hatch texture
+    // North plunging rock face
+    ctx.fillStyle = '#11100E';
+    ctx.beginPath();
+    ctx.moveTo(pitX, pitY);
+    ctx.lineTo(pitX + pitW, pitY);
+    ctx.lineTo(deepTR.x, deepTR.y);
+    ctx.lineTo(deepTL.x, deepTL.y);
+    ctx.closePath();
+    ctx.fill();
+    drawCharcoalHatchRect(
+      ctx,
+      pitX,
+      pitY,
+      pitW,
+      Math.max(40, deepTL.y - pitY),
+      601,
+      9,
+      0.08,
+      'rgba(148, 140, 128, 0.16)',
+      1.1,
+    );
+
+    // West plunging rock face
+    ctx.fillStyle = '#0D0C0B';
+    ctx.beginPath();
+    ctx.moveTo(pitX, pitY);
+    ctx.lineTo(deepTL.x, deepTL.y);
+    ctx.lineTo(deepBL.x, deepBL.y);
+    ctx.lineTo(pitX, pitY + pitH);
+    ctx.closePath();
+    ctx.fill();
+    drawCharcoalHatchRect(
+      ctx,
+      pitX,
+      pitY,
+      Math.max(30, deepTL.x - pitX + 14),
+      pitH,
+      602,
+      8,
+      -0.24,
+      'rgba(140, 132, 120, 0.15)',
+      1.0,
+    );
+
+    // East plunging rock face (darker side)
+    ctx.fillStyle = '#090908';
+    ctx.beginPath();
+    ctx.moveTo(pitX + pitW, pitY);
+    ctx.lineTo(deepTR.x, deepTR.y);
+    ctx.lineTo(deepBR.x, deepBR.y);
+    ctx.lineTo(pitX + pitW, pitY + pitH);
+    ctx.closePath();
+    ctx.fill();
+    drawCharcoalHatchRect(
+      ctx,
+      deepTR.x - 14,
+      pitY,
+      Math.max(30, pitX + pitW - deepTR.x + 14),
+      pitH,
+      603,
+      9,
+      0.24,
+      'rgba(120, 114, 105, 0.14)',
+      1.0,
+    );
+
+    // Dark abyssal funnel sink in the center (absorbs middle into true black #020202)
+    const abyssFade = ctx.createRadialGradient(
+      (deepTL.x + deepBR.x) * 0.5,
+      (deepTL.y + deepBR.y) * 0.52,
+      14,
+      (deepTL.x + deepBR.x) * 0.5,
+      (deepTL.y + deepBR.y) * 0.52,
+      155,
+    );
+    abyssFade.addColorStop(0, 'rgba(2, 2, 2, 0.96)');
+    abyssFade.addColorStop(0.65, 'rgba(3, 3, 3, 0.68)');
+    abyssFade.addColorStop(1, 'rgba(3, 3, 3, 0)');
+    ctx.fillStyle = abyssFade;
+    ctx.fillRect(pitX, pitY, pitW, pitH);
+
+    // Micro-event 4: Sparse isolated white chalk motes rising slowly in the abyssal draft
+    [0.24, 0.57, 0.78].forEach((rx, idx) => {
+      const drift = s.prefersReducedMotion ? 0 : ((s.ts * 0.009 + idx * 97) % (pitH - 40));
+      const mx = Math.round(pitX + pitW * rx - camDx * 0.3);
+      const my = Math.round(pitY + pitH - 22 - drift);
+      ctx.fillStyle = idx === 1 ? 'rgba(250, 248, 245, 0.8)' : 'rgba(185, 178, 168, 0.55)';
+      ctx.fillRect(mx, my, 1, 2);
+    });
+
+    // Rare pure abyssal pinpoint cues at the very bottom
+    const abP1 = projectB2(pitX + pitW * 0.44, pitY + pitH * 0.74, 4.7);
+    const abP2 = projectB2(pitX + pitW * 0.63, pitY + pitH * 0.84, 5.0);
+    ctx.fillStyle = '#FAF8F5';
+    ctx.fillRect(Math.round(abP1.x), Math.round(abP1.y), 2, 2);
+    ctx.fillStyle = 'rgba(218, 176, 112, 0.85)';
+    ctx.fillRect(Math.round(abP2.x), Math.round(abP2.y), 1, 1);
+
+    // B. PLAN LOINTAIN (z = 2.6 -> 4.0) — Silhouettes, arche cyclopéenne, nacelle lointaine
+    // Broken masonry rings at z = 2.65 and z = 3.85
+    [2.65, 3.85].forEach((z, idx) => {
+      const tl = projectB2(pitX, pitY, z);
+      const tr = projectB2(pitX + pitW, pitY, z);
+      const br = projectB2(pitX + pitW, pitY + pitH, z);
+      const bl = projectB2(pitX, pitY + pitH, z);
+      drawBrokenPolyRing(
+        ctx,
+        [tl, tr, br, bl],
+        620 + idx * 40,
+        idx === 0 ? 'rgba(165, 158, 146, 0.24)' : 'rgba(125, 118, 110, 0.14)',
+        1.1,
+        2.1,
+      );
+    });
+
+    // Distant cyclopean stone cross-archway (z = 2.85) with tiny moving lantern (Micro-event 1)
+    {
+      const z = 2.85;
+      const aL = projectB2(pitX + 46, pitY + 210, z);
+      const aR = projectB2(pitX + 240, pitY + 210, z);
+      const span = aR.x - aL.x;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(155, 148, 138, 0.30)';
+      ctx.lineWidth = Math.max(2, Math.round(7 * aL.s));
+      ctx.beginPath();
+      ctx.arc((aL.x + aR.x) * 0.5, aL.y + 18, span * 0.48, Math.PI * 1.12, Math.PI * 1.88);
+      ctx.stroke();
+      // Charred underside hatch under the arch
+      drawCharcoalStroke(
+        ctx,
+        aL.x + 8,
+        aL.y + 2,
+        aR.x - 8,
+        aL.y + 3,
+        641,
+        'rgba(175, 168, 156, 0.22)',
+        1.1,
+      );
+      // Micro-event 1: tiny distant lantern patrolling slowly along the far gallery ledge
+      const patrolT = s.prefersReducedMotion ? 0.42 : 0.5 + Math.sin(s.ts * 0.00045) * 0.32;
+      const lxFar = Math.round(aL.x + span * (0.2 + patrolT * 0.6));
+      const lyFar = Math.round(aL.y - 3);
+      ctx.fillStyle = '#FAF8F5';
+      ctx.fillRect(lxFar, lyFar, 2, 2);
+      ctx.restore();
+    }
+
+    // Distant miniature scaffold & descending cage (z = 3.5, Micro-event 2)
+    {
+      const z = 3.5;
+      const pL = projectB2(pitX + 94, pitY + 236, z);
+      const pR = projectB2(pitX + 196, pitY + 236, z);
+      ctx.fillStyle = '#11100E';
+      ctx.fillRect(pL.x, pL.y, pR.x - pL.x, 5);
+      drawCharcoalStroke(ctx, pL.x, pL.y, pR.x, pL.y, 650, 'rgba(165, 158, 146, 0.28)', 1.0);
+
+      // Micro-event 2: miniature distant cage slowly rising/descending on hairline thread
+      const cageShift = s.prefersReducedMotion ? 0 : Math.sin(s.ts * 0.00035) * 4.5;
+      const mcX = Math.round(pR.x - 14);
+      const mcY = Math.round(pL.y - 16 + cageShift);
+      drawGesturalLine(ctx, mcX + 4, pitY + 28, mcX + 4, mcY, 652, 'rgba(160, 154, 144, 0.25)', 0.8);
+      ctx.fillStyle = '#161412';
+      ctx.fillRect(mcX, mcY, 8, 9);
+      ctx.strokeStyle = 'rgba(185, 178, 168, 0.35)';
+      ctx.lineWidth = 0.9;
+      ctx.strokeRect(mcX, mcY, 8, 9);
+    }
+
+    // Jagged charcoal shaft corner spines connecting top rim toward deep corners
+    [
+      { x: pitX, y: pitY },
+      { x: pitX + pitW, y: pitY },
+      { x: pitX, y: pitY + pitH },
+      { x: pitX + pitW, y: pitY + pitH },
+    ].forEach((c, idx) => {
+      const deep = projectB2(c.x, c.y, 4.5);
+      drawCharcoalStroke(ctx, c.x, c.y, deep.x, deep.y, 660 + idx, 'rgba(165, 158, 146, 0.36)', 1.5, 2.4);
+    });
+
+    // C. PLAN INTERMÉDIAIRE (z = 0.68 -> 1.85) — Maçonnerie brisée, passerelle occultée, cage, câble maître
+    [0.75, 1.65].forEach((z, idx) => {
+      const tl = projectB2(pitX, pitY, z);
+      const tr = projectB2(pitX + pitW, pitY, z);
+      const br = projectB2(pitX + pitW, pitY + pitH, z);
+      const bl = projectB2(pitX, pitY + pitH, z);
+      drawBrokenPolyRing(
+        ctx,
+        [tl, tr, br, bl],
+        680 + idx * 35,
+        idx === 0 ? 'rgba(195, 188, 174, 0.42)' : 'rgba(175, 168, 156, 0.30)',
+        idx === 0 ? 1.5 : 1.2,
+        2.3,
+      );
+    });
+
+    // Occluded East-Wall Walkway (z = 1.72) disappearing inside a dark carved archway on the right rock wall!
+    {
+      const z = 1.72;
+      const pL = projectB2(pitX + 82, pitY + 188, z);
+      const pR = projectB2(pitX + 248, pitY + 188, z);
+      const wallSocket = projectB2(pitX + pitW + 18, pitY + 190, z);
+      const h = Math.max(8, Math.round(16 * pL.s));
+
+      // Dark arched tunnel mouth carved into the east wall (occlusion cue!)
+      ctx.fillStyle = '#030303';
+      ctx.beginPath();
+      ctx.arc(wallSocket.x - 16, pL.y + 4, 15, Math.PI, 0);
+      ctx.lineTo(wallSocket.x - 1, pL.y + 18);
+      ctx.lineTo(wallSocket.x - 31, pL.y + 18);
+      ctx.closePath();
+      ctx.fill();
+
+      // Secondary plank walkway disappearing into the east tunnel
+      ctx.fillStyle = '#1D1A16';
+      ctx.fillRect(pR.x - 10, pL.y + 2, wallSocket.x - pR.x + 8, Math.max(5, h - 4));
+      drawCharcoalStroke(ctx, pR.x - 10, pL.y + 2, wallSocket.x - 4, pL.y + 2, 701, 'rgba(190, 182, 170, 0.42)', 1.2);
+
+      // Suspended platform planks & underside struts
+      ctx.fillStyle = '#25211C';
+      ctx.fillRect(pL.x, pL.y, pR.x - pL.x, h);
+      drawCharcoalHatchRect(ctx, pL.x, pL.y + 4, pR.x - pL.x, h - 4, 702, 7, 0.2, 'rgba(6, 6, 5, 0.65)', 1.1);
+      drawCharcoalStroke(ctx, pL.x - 2, pL.y, pR.x + 2, pL.y, 703, 'rgba(215, 208, 194, 0.56)', 1.4);
+      // Irregular hand-sketched railing posts
+      for (let rx = pL.x + 7; rx < pR.x - 4; rx += 13) {
+        drawGesturalLine(ctx, rx, pL.y, rx + (hash2D(rx, 2, 1) - 0.5) * 2, pL.y - 6, 705 + rx, 'rgba(185, 178, 166, 0.42)', 1.1, 0.8);
+      }
+    }
+
+    // West-side suspended iron cage (z = 1.28) + Micro-event 3: gentle chain sway below
+    {
+      const z = 1.28;
+      const cTop = projectB2(pitX + 66, pitY + 95, z);
+      const cw = Math.round(30 * cTop.s);
+      const ch = Math.round(24 * cTop.s);
+      // Suspension cables disappearing upward behind north-west overhang
+      const anchorL = projectB2(pitX + 68, pitY + 6, 0.25);
+      const anchorR = projectB2(pitX + 96, pitY + 6, 0.25);
+      drawCharcoalStroke(ctx, anchorL.x, anchorL.y, cTop.x + 3, cTop.y, 710, 'rgba(165, 158, 148, 0.34)', 1.1);
+      drawCharcoalStroke(ctx, anchorR.x, anchorR.y, cTop.x + cw - 3, cTop.y, 711, 'rgba(165, 158, 148, 0.34)', 1.1);
+
+      ctx.fillStyle = '#151311';
+      ctx.fillRect(cTop.x, cTop.y, cw, ch);
+      drawBrokenPolyRing(
+        ctx,
+        [
+          { x: cTop.x, y: cTop.y },
+          { x: cTop.x + cw, y: cTop.y },
+          { x: cTop.x + cw, y: cTop.y + ch },
+          { x: cTop.x, y: cTop.y + ch },
+        ],
+        712,
+        'rgba(195, 188, 176, 0.48)',
+        1.2,
+        1.2,
+      );
+      for (let bx = 6; bx < cw - 4; bx += 6) {
+        drawGesturalLine(ctx, cTop.x + bx, cTop.y + 1, cTop.x + bx, cTop.y + ch - 1, 720 + bx, 'rgba(120, 114, 104, 0.45)', 0.9);
+      }
+      // Micro-event 3: dangling chain beneath the cage swaying subtly in the shaft draft
+      const sway = s.prefersReducedMotion ? 0 : Math.sin(s.ts * 0.0014) * 1.4;
+      drawCharcoalStroke(
+        ctx,
+        cTop.x + cw * 0.5,
+        cTop.y + ch,
+        cTop.x + cw * 0.5 + sway,
+        cTop.y + ch + 38,
+        728,
+        'rgba(155, 148, 138, 0.38)',
+        1.0,
+        1.4,
+      );
+    }
+
+    // Near-mid heavy timber rigging deck (z = 0.78) with diagonal bracing & rope tie-offs
+    {
+      const z = 0.78;
+      const pL = projectB2(pitX + 52, pitY + 148, z);
+      const pR = projectB2(pitX + 234, pitY + 148, z);
+      const h = Math.round(20 * pL.s);
+
+      // Shadow underside + diagonal bracing struts
+      ctx.fillStyle = '#2A251F';
+      ctx.fillRect(pL.x, pL.y, pR.x - pL.x, h);
+      drawCharcoalHatchRect(ctx, pL.x, pL.y + 4, pR.x - pL.x, h - 4, 730, 8, -0.35, 'rgba(6, 5, 5, 0.72)', 1.2);
+      drawCharcoalStroke(ctx, pL.x - 3, pL.y, pR.x + 3, pL.y, 731, 'rgba(232, 224, 210, 0.72)', 1.7);
+      drawCharcoalStroke(ctx, pL.x + 10, pL.y + h, pL.x + 32, pL.y + h + 14, 732, 'rgba(165, 158, 146, 0.42)', 1.3);
+      drawCharcoalStroke(ctx, pR.x - 10, pL.y + h, pR.x - 32, pL.y + h + 14, 733, 'rgba(165, 158, 146, 0.42)', 1.3);
+
+      // Corner rigging cables tied upward to level 0
+      const topAnchorL = projectB2(pitX + 52, pitY + 10, 0.16);
+      const topAnchorR = projectB2(pitX + 234, pitY + 10, 0.16);
+      drawCharcoalStroke(ctx, topAnchorL.x, topAnchorL.y, pL.x + 6, pL.y, 734, 'rgba(195, 188, 176, 0.46)', 1.3);
+      drawCharcoalStroke(ctx, topAnchorR.x, topAnchorR.y, pR.x - 6, pL.y, 735, 'rgba(195, 188, 176, 0.46)', 1.3);
+    }
+
+    // Master continuous Hoist Cable descending from Level-0 Winch (x=9, y=1) through all 3 depths
+    // Drawn BEFORE the player's bridge so the bridge genuinely occludes it!
+    {
+      const cTop = projectB2(9 * T + 24, pitY, 0.08);
+      const cMid = projectB2(9 * T + 24, pitY + 148, 0.78);
+      const cDeep = projectB2(9 * T + 24, pitY + 238, 3.6);
+      drawCharcoalStroke(ctx, cTop.x, pitY, cMid.x, cMid.y, 740, '#C7C0B4', 2.1, 1.1);
+      drawCharcoalStroke(ctx, cMid.x, cMid.y, cDeep.x, cDeep.y, 741, 'rgba(165, 158, 148, 0.45)', 1.4, 1.1);
+    }
+
+    // West rock overhang shelf (Occlusion element in Plan proche / intermédiaire)
+    {
+      const oShiftX = effectiveParallax ? -camDx * 3.4 : 0;
+      const oShiftY = effectiveParallax ? -camDy * 2.6 : 0;
+      ctx.fillStyle = '#0B0A09';
+      ctx.beginPath();
+      ctx.moveTo(pitX, pitY + 22);
+      ctx.lineTo(pitX + 46 + oShiftX, pitY + 46 + oShiftY);
+      ctx.lineTo(pitX + 34 + oShiftX, pitY + 104 + oShiftY);
+      ctx.lineTo(pitX, pitY + 124);
+      ctx.closePath();
+      ctx.fill();
+      drawCharcoalHatchRect(ctx, pitX, pitY + 26, 44, 96, 750, 7, -0.3, 'rgba(155, 148, 136, 0.22)', 1.1);
+      drawCharcoalStroke(
+        ctx,
+        pitX + 2,
+        pitY + 24,
+        pitX + 46 + oShiftX,
+        pitY + 46 + oShiftY,
+        751,
+        'rgba(185, 178, 166, 0.44)',
+        1.5,
+      );
+      drawCharcoalStroke(
+        ctx,
+        pitX + 46 + oShiftX,
+        pitY + 46 + oShiftY,
+        pitX + 34 + oShiftX,
+        pitY + 104 + oShiftY,
+        752,
+        'rgba(155, 148, 136, 0.35)',
+        1.4,
+      );
+    }
+
+    // D. PLAN PROCHE (z = 0.0 -> 0.45) — Lèvre de falaise sous le bord & pilotis de l'éperon
+    {
+      const nearShiftX = effectiveParallax ? Math.round(-camDx * 3.8) : 0;
+      const nearShiftY = effectiveParallax ? Math.round(-camDy * 3.0) : 0;
+
+      // Vertical rock undercut beneath the north Pit rim (strong physical overhang!)
+      ctx.fillStyle = '#141311';
+      ctx.fillRect(pitX, pitY, pitW, 20);
+      drawCharcoalHatchRect(ctx, pitX, pitY + 2, pitW, 18, 760, 7, 0.05, 'rgba(175, 168, 156, 0.25)', 1.2);
+      ctx.fillStyle = 'rgba(2, 2, 2, 0.82)';
+      ctx.fillRect(pitX, pitY, pitW, 8);
+
+      // Vertical rock cliff lip on the west & east immediate borders
+      ctx.fillStyle = '#171513';
+      ctx.fillRect(pitX, pitY, 14, pitH);
+      drawCharcoalHatchRect(ctx, pitX + 2, pitY + 4, 12, pitH - 8, 761, 8, -0.15, 'rgba(170, 162, 150, 0.24)', 1.1);
+      ctx.fillStyle = '#12110F';
+      ctx.fillRect(pitX + pitW - 14, pitY, 14, pitH);
+      drawCharcoalHatchRect(ctx, pitX + pitW - 14, pitY + 4, 12, pitH - 8, 762, 8, 0.15, 'rgba(150, 144, 134, 0.2)', 1.1);
+
+      // Protruding weathered timber beam-ends jutting out beneath the north & west stone rim
+      [pitX + 38, pitX + 198, pitX + 248].forEach((bx, idx) => {
+        ctx.fillStyle = '#25201A';
+        ctx.fillRect(bx + nearShiftX * 0.4, pitY + 6 + nearShiftY * 0.2, 8, 14);
+        drawCharcoalStroke(
+          ctx,
+          bx + nearShiftX * 0.4,
+          pitY + 6 + nearShiftY * 0.2,
+          bx + nearShiftX * 0.4,
+          pitY + 20 + nearShiftY * 0.2,
+          770 + idx,
+          '#9C9589',
+          1.2,
+        );
+      });
+
+      // Heavy cast drop shadow & cliff pilings anchored under the Chest Spur (x=7, y=3)
+      ctx.fillStyle = 'rgba(2, 2, 2, 0.85)';
+      ctx.fillRect(spurX - 6, spurY + T, T + 16, 22);
+      ctx.fillStyle = '#241F1A';
+      ctx.fillRect(spurX + 8 + nearShiftX * 0.3, spurY + T, 7, 36);
+      ctx.fillRect(spurX + T - 15 + nearShiftX * 0.3, spurY + T, 7, 36);
+      drawCharcoalStroke(
+        ctx,
+        spurX + 8 + nearShiftX * 0.3,
+        spurY + T,
+        spurX + 8 + nearShiftX * 0.3,
+        spurY + T + 36,
+        780,
+        '#9A9388',
+        1.3,
+      );
+      drawCharcoalStroke(
+        ctx,
+        spurX + T - 15 + nearShiftX * 0.3,
+        spurY + T,
+        spurX + T - 15 + nearShiftX * 0.3,
+        spurY + T + 36,
+        781,
+        '#9A9388',
+        1.3,
+      );
+      drawCharcoalStroke(
+        ctx,
+        spurX + 10 + nearShiftX * 0.3,
+        spurY + T + 18,
+        spurX + T - 10 + nearShiftX * 0.3,
+        spurY + T + 2,
+        782,
+        '#787166',
+        1.2,
+      );
+
+      // Bridge abutment stone brackets & deep drop shadow below bridge planks
+      ctx.fillStyle = '#1E1B17';
+      ctx.fillRect(pitX, bridgeY + bridgeH, 16, 44);
+      ctx.fillRect(pitX + pitW - 16, bridgeY + bridgeH, 16, 44);
+      ctx.fillStyle = 'rgba(2, 2, 2, 0.82)';
+      ctx.fillRect(pitX, bridgeY + bridgeH, pitW, 18);
+    }
   } else {
     // -------------------------------------------------------------------------
     // EXPÉRIENCE C : REPRÉSENTATION HYBRIDE (Coupe verticale oblique stylisée)
@@ -897,6 +1463,39 @@ function renderHybridGesturalExperiment(
       const py = ty * T;
 
       if (kind === 'pit') {
+        if (experiment === 'exp_b2') {
+          // Physical chipped rock parapet lip & broken guardrail bollards ("être au bord")
+          if (isWalkable(tx, ty - 1)) {
+            ctx.fillStyle = '#2B2823';
+            ctx.fillRect(px, py, T, 6);
+            drawCharcoalStroke(ctx, px, py + 1, px + T, py + 1, tx * 11 + ty, '#C5BEB1', 2.5, 2.0);
+            drawCharcoalStroke(ctx, px + 2, py + 5, px + T - 2, py + 5, tx * 12 + ty, '#5A554D', 1.4, 1.8);
+          }
+          if (isWalkable(tx, ty + 1)) {
+            ctx.fillStyle = '#26231F';
+            ctx.fillRect(px, py + T - 6, T, 6);
+            drawCharcoalStroke(ctx, px, py + T - 1, px + T, py + T - 1, tx * 13 + ty, '#C5BEB1', 2.5, 2.0);
+          }
+          if (isWalkable(tx - 1, ty)) {
+            ctx.fillStyle = '#2D2924';
+            ctx.fillRect(px, py, 7, T);
+            drawCharcoalStroke(ctx, px + 1, py, px + 1, py + T, tx * 17 + ty, '#CFC8BA', 2.8, 2.1);
+            drawCharcoalStroke(ctx, px + 6, py + 2, px + 6, py + T - 2, tx * 18 + ty, '#544F47', 1.5, 1.8);
+            if (ty === 2 || ty === 5) {
+              // Leaning wooden guardrail post at pit rim
+              ctx.fillStyle = '#3B3228';
+              ctx.fillRect(px + 2, py + 14, 5, 12);
+              drawCharcoalStroke(ctx, px + 4, py + 14, px + 7, py + 4, tx * 29 + ty, '#B8B0A2', 1.7, 1.1);
+            }
+          }
+          if (isWalkable(tx + 1, ty)) {
+            ctx.fillStyle = '#27241F';
+            ctx.fillRect(px + T - 6, py, 6, T);
+            drawCharcoalStroke(ctx, px + T - 1, py, px + T - 1, py + T, tx * 19 + ty, '#C5BEB1', 2.6, 2.0);
+          }
+          continue;
+        }
+
         // Broken chalk-dusted parapet rim marking exact collision edge against the void
         if (isWalkable(tx, ty - 1)) {
           drawGesturalLine(ctx, px, py + 1, px + T, py + 1, tx * 11 + ty, '#B5AEA2', 2.2, 1.4);
@@ -943,33 +1542,48 @@ function renderHybridGesturalExperiment(
         // Pure deep charcoal wall mass with gestural mineral grain
         ctx.fillStyle = '#090908';
         ctx.fillRect(px, py, T, T);
-        for (let i = 0; i < 4; i++) {
-          const hx = px + 6 + hash2D(tx, ty, i) * (T - 14);
-          const hy = py + 8 + hash2D(tx, ty, i + 7) * (T - 14);
-          drawGesturalLine(
+        if (experiment === 'exp_b2') {
+          drawCharcoalHatchRect(
             ctx,
-            hx,
-            hy,
-            hx + 10,
-            hy + (hash2D(tx, ty, i + 21) - 0.5) * 6,
-            tx * 23 + ty + i,
-            'rgba(135, 128, 118, 0.16)',
-            1.1,
-            1.2,
+            px + 3,
+            py + 3,
+            T - 6,
+            T - 6,
+            tx * 59 + ty,
+            11,
+            0.35,
+            'rgba(128, 122, 112, 0.14)',
+            1.0,
           );
+        } else {
+          for (let i = 0; i < 4; i++) {
+            const hx = px + 6 + hash2D(tx, ty, i) * (T - 14);
+            const hy = py + 8 + hash2D(tx, ty, i + 7) * (T - 14);
+            drawGesturalLine(
+              ctx,
+              hx,
+              hy,
+              hx + 10,
+              hy + (hash2D(tx, ty, i + 21) - 0.5) * 6,
+              tx * 23 + ty + i,
+              'rgba(135, 128, 118, 0.16)',
+              1.1,
+              1.2,
+            );
+          }
         }
         // Chipped gestural edge ONLY along sides touching walkable floors
         if (isWalkable(tx, ty + 1)) {
-          drawGesturalLine(ctx, px, py + T - 1, px + T, py + T - 1, tx * 7 + ty, '#8E887D', 1.8, 1.6);
+          drawCharcoalStroke(ctx, px, py + T - 1, px + T, py + T - 1, tx * 7 + ty, '#969084', 1.9, 1.7);
         }
         if (isWalkable(tx, ty - 1)) {
-          drawGesturalLine(ctx, px, py + 1, px + T, py + 1, tx * 9 + ty, '#8E887D', 1.8, 1.6);
+          drawCharcoalStroke(ctx, px, py + 1, px + T, py + 1, tx * 9 + ty, '#969084', 1.9, 1.7);
         }
         if (isWalkable(tx + 1, ty)) {
-          drawGesturalLine(ctx, px + T - 1, py, px + T - 1, py + T, tx * 11 + ty, '#8E887D', 1.8, 1.6);
+          drawCharcoalStroke(ctx, px + T - 1, py, px + T - 1, py + T, tx * 11 + ty, '#969084', 1.9, 1.7);
         }
         if (isWalkable(tx - 1, ty)) {
-          drawGesturalLine(ctx, px + 1, py, px + 1, py + T, tx * 13 + ty, '#8E887D', 1.8, 1.6);
+          drawCharcoalStroke(ctx, px + 1, py, px + 1, py + T, tx * 13 + ty, '#969084', 1.9, 1.7);
         }
         continue;
       }
@@ -986,48 +1600,67 @@ function renderHybridGesturalExperiment(
       if (kind === 'bridge') {
         const sag = s.bridgeSagTimer > 0 && s.bridgeSagX === tx ? 2 : 0;
         // Shadow beneath bridge so planks clearly hover over the Pit!
-        ctx.fillStyle = 'rgba(2, 2, 2, 0.65)';
-        ctx.fillRect(px, py + 34 + sag, T, 10);
+        ctx.fillStyle = 'rgba(2, 2, 2, 0.72)';
+        ctx.fillRect(px, py + 34 + sag, T, 11);
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(atlas.bridge, px, py + sag, T, T);
         continue;
       }
 
       // Walkable stone floor with subtle rubbed charcoal grain
-      ctx.fillStyle = '#23211E';
+      ctx.fillStyle = experiment === 'exp_b2' ? '#25231F' : '#23211E';
       ctx.fillRect(px, py, T, T);
-      for (let i = 0; i < 4; i++) {
+      if (experiment === 'exp_b2') {
+        drawCharcoalHatchRect(
+          ctx,
+          px + 2,
+          py + 2,
+          T - 4,
+          T - 4,
+          tx * 83 + ty * 13,
+          12,
+          -0.25,
+          'rgba(12, 11, 10, 0.34)',
+          1.0,
+        );
+      }
+      for (let i = 0; i < (experiment === 'exp_b2' ? 6 : 4); i++) {
         const sx = px + 6 + hash2D(tx, ty, i + 40) * (T - 14);
         const sy = py + 8 + hash2D(tx, ty, i + 55) * (T - 14);
         drawGesturalLine(
           ctx,
           sx,
           sy,
-          sx + 9,
+          sx + 10,
           sy + (hash2D(tx, ty, i + 70) - 0.5) * 4,
           tx * 41 + ty + i,
-          i % 2 === 0 ? 'rgba(16, 15, 14, 0.55)' : 'rgba(90, 85, 78, 0.28)',
+          i % 2 === 0 ? 'rgba(14, 13, 12, 0.58)' : 'rgba(98, 92, 84, 0.32)',
           1.1,
-          1.0,
+          1.2,
         );
       }
     }
   }
 
-  // Expérience B : Anchor the Level-0 Hoist Winch frame on the north wall rim (x=9, y=0/1 border)
-  if (experiment === 'exp_b') {
-    const wx = 9 * T + 6;
-    const wy = T - 14;
-    ctx.fillStyle = '#1B1814';
-    ctx.fillRect(wx, wy, 36, 16);
-    drawGesturalLine(ctx, wx, wy, wx + 36, wy, 480, '#C7C0B4', 1.8);
-    drawGesturalLine(ctx, wx + 6, wy, wx + 6, wy + 18, 481, '#9E978B', 2);
-    drawGesturalLine(ctx, wx + 30, wy, wx + 30, wy + 18, 482, '#9E978B', 2);
+  // Expérience B & B2 : Anchor the Level-0 Hoist Winch frame on the north wall rim (x=9, y=0/1 border)
+  if (experiment === 'exp_b' || experiment === 'exp_b2') {
+    const wx = 9 * T + 4;
+    const wy = T - 16;
+    ctx.fillStyle = '#1A1713';
+    ctx.fillRect(wx, wy, 40, 18);
+    drawCharcoalStroke(ctx, wx - 2, wy, wx + 42, wy, 480, '#CFC8BA', 2.0, 1.3);
+    drawCharcoalStroke(ctx, wx + 6, wy, wx + 6, wy + 20, 481, '#A69E92', 2.1, 1.1);
+    drawCharcoalStroke(ctx, wx + 34, wy, wx + 34, wy + 20, 482, '#A69E92', 2.1, 1.1);
+    if (experiment === 'exp_b2') {
+      // Diagonal timber brace anchored into the north stone wall
+      drawCharcoalStroke(ctx, wx - 6, wy - 6, wx + 6, wy + 10, 483, '#7C756A', 1.6, 1.2);
+      drawCharcoalStroke(ctx, wx + 46, wy - 6, wx + 34, wy + 10, 484, '#7C756A', 1.6, 1.2);
+    }
     // Winch drum wheel
-    ctx.strokeStyle = '#D8D2C6';
-    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = '#DED8CC';
+    ctx.lineWidth = 1.7;
     ctx.beginPath();
-    ctx.arc(wx + 18, wy + 7, 6, 0, Math.PI * 2);
+    ctx.arc(wx + 20, wy + 8, 7, 0, Math.PI * 2);
     ctx.stroke();
   }
 
